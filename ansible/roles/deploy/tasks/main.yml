@@ -1,0 +1,49 @@
+- name: 'create app directory'
+  file:
+    path: /home/{{app_user}}/server
+    state: directory
+    owner: '{{app_user}}'
+    group: '{{app_user}}'
+  tags:
+    - 'setup'
+- name: 'create PR build log directory'
+  file:
+    path: /home/{{app_user}}/server/job-output
+    state: directory
+    owner: '{{app_user}}'
+    group: '{{app_user}}'
+  tags:
+    - 'setup'
+- name: 'create result directory'
+  file:
+    path: /home/{{app_user}}/server/bench-results
+    state: directory
+    owner: '{{app_user}}'
+    group: '{{app_user}}'
+  tags:
+    - 'setup'
+- name: 'upload app config'
+  template:
+    src: 'config.json'
+    dest: '/home/{{app_user}}/server/config.json'
+    owner: '{{app_user}}'
+    group: '{{app_user}}'
+  notify:
+    - 'start app'
+- name: 'upload app binary'
+  copy:
+    src: '../ci-bench-runner/target/release/ci-bench-runner'
+    dest: '/home/{{app_user}}/server/ci-bench-runner'
+    mode: 'u=rwx,g=r,o=r'
+    owner: '{{app_user}}'
+    group: '{{app_user}}'
+  notify:
+    - 'start app'
+- name: 'upload systemd service file'
+  template:
+    src: 'ci-bench-runner.service'
+    dest: '/etc/systemd/system'
+    owner: 'root'
+    group: 'root'
+  notify:
+    - 'start app'

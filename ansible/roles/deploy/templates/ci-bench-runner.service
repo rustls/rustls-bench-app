@@ -1,0 +1,13 @@
+[Unit]
+Description=rustls CI bench runner
+
+[Service]
+User={{app_user}}
+Group={{app_user}}
+WorkingDirectory=/home/{{app_user}}/server
+
+# There is no straightforward way to extend the PATH in systemd itself (which is needed to use rust)
+ExecStart=/bin/bash -c 'PATH=/home/{{app_user}}/.cargo/bin:$PATH exec /home/{{app_user}}/server/ci-bench-runner'
+
+[Install]
+WantedBy=multi-user.target

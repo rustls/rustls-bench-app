@@ -1,0 +1,12 @@
+{
+  "app_base_url": "https://example.com",
+  "job_output_dir": "/home/{{app_user}}/server/job-output",
+  "path_to_db": ":memory:",
+  "webhook_secret": "{{ webhook_secret }}",
+  "github_app_id": 405053,
+  "github_app_key": "{{ github_app_key }}",
+  "github_repo_owner": "rustls",
+  "github_repo_name": "rustls",
+  "sentry_dsn": "{{ sentry_dsn }}",
+  "port": 3000
+}

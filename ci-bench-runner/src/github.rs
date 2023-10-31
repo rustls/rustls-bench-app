@@ -1,0 +1,246 @@
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use anyhow::Context;
+use hmac::{Hmac, Mac};
+use jsonwebtoken::EncodingKey;
+use octocrab::models::pulls::PullRequest;
+use octocrab::models::{InstallationId, StatusState};
+use octocrab::Octocrab;
+use serde::Deserialize;
+use serde_json::json;
+use sha2::digest::FixedOutput;
+use sha2::Sha256;
+use tracing::{debug, error, trace, warn};
+
+use crate::AppConfig;
+
+#[derive(Deserialize)]
+pub struct PullRequestReviewEvent {
+    pub action: String,
+    pub review: Review,
+    pub pull_request: PullRequest,
+}
+
+#[derive(Deserialize)]
+pub struct Review {
+    pub author_association: String,
+    pub state: String,
+    pub commit_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct PushEvent {
+    #[serde(rename = "ref")]
+    pub git_ref: String,
+    pub repository: Repo,
+    pub after: String,
+    pub deleted: bool,
+}
+
+#[derive(Deserialize)]
+pub struct CommentEvent {
+    pub action: String,
+    pub comment: Comment,
+    pub issue: Issue,
+}
+
+#[derive(Deserialize)]
+pub struct Comment {
+    pub author_association: String,
+    pub body: String,
+    pub user: GitHubUser,
+}
+
+#[derive(Deserialize)]
+pub struct Issue {
+    pub number: u64,
+    pub pull_request: Option<PullRequestLite>,
+    pub comments_url: String,
+}
+
+#[derive(Deserialize)]
+pub struct PullRequestLite {
+    pub url: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitHubUser {
+    pub login: String,
+}
+
+#[derive(Deserialize)]
+pub struct Repo {
+    pub clone_url: String,
+}
+
+#[derive(Clone)]
+pub struct CachedOctocrab {
+    app_client: Octocrab,
+    installation_id: InstallationId,
+    installation_client: Arc<Mutex<Octocrab>>,
+}
+
+impl CachedOctocrab {
+    /// Creates a new CachedOctocrab instance.
+    ///
+    /// This constructor queries the GitHub API before returning in order to retrieve the app
+    /// installation id and a fresh token corresponding to it. It also spawns a background tokio
+    /// task to regularly refresh the token.
+    pub async fn new(
+        github_api_base_url: Option<&str>,
+        config: &AppConfig,
+    ) -> anyhow::Result<Self> {
+        let key = EncodingKey::from_rsa_pem(config.github_app_key.as_bytes()).unwrap();
+        let mut octocrab_builder = Octocrab::builder().app(config.github_app_id.into(), key);
+
+        if let Some(base_url) = github_api_base_url {
+            // Overriding the GitHub's url is necessary to mock API requests in tests
+            octocrab_builder = octocrab_builder.base_uri(base_url).context("invalid url")?;
+        }
+
+        let app_client = octocrab_builder.build()?;
+        let installation = app_client
+            .apps()
+            .get_repository_installation(&config.github_repo_owner, &config.github_repo_name)
+            .await
+            .context("failed to obtain GitHub app installation information")?;
+
+        let unauthenticated_client = app_client.clone();
+        let cache = Self {
+            app_client,
+            installation_id: installation.id,
+            installation_client: Arc::new(Mutex::new(unauthenticated_client)),
+        };
+        cache.refresh_token().await?;
+        cache.clone().refresh_token_in_background();
+
+        Ok(cache)
+    }
+
+    /// Refresh the installation token once
+    async fn refresh_token(&self) -> anyhow::Result<()> {
+        let (authenticated_client, _) = self
+            .app_client
+            .installation_and_token(self.installation_id)
+            .await
+            .context("failed to obtain GitHub app installation token")?;
+
+        *self.installation_client.lock().unwrap() = authenticated_client;
+
+        Ok(())
+    }
+
+    /// Regularly refresh the installation token in the background
+    fn refresh_token_in_background(self) {
+        tokio::spawn(async move {
+            loop {
+                // The installation access token will expire after 1 hour, so we refresh it every
+                // 30 minutes
+                // (see https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation)
+                tokio::time::sleep(Duration::from_secs(60 * 30)).await;
+
+                // In case of failure, log it and retry every 5 minutes
+                while let Err(e) = self.refresh_token().await {
+                    warn!(cause = e.to_string(), "failed to refresh GitHub token");
+                    tokio::time::sleep(Duration::from_secs(60 * 5)).await;
+                }
+            }
+        });
+    }
+
+    /// Returns the cached and authenticated `Octocrab` client
+    pub fn cached(&self) -> Octocrab {
+        self.installation_client.lock().unwrap().clone()
+    }
+}
+
+/// Updates a commit's status and logs the result
+pub async fn update_commit_status(
+    sha: String,
+    state: StatusState,
+    config: &AppConfig,
+    octocrab: &Octocrab,
+) {
+    let post_result = octocrab
+        .repos(&config.github_repo_owner, &config.github_repo_name)
+        .create_status(sha, state)
+        .context("icount benchmarks".to_string())
+        .send()
+        .await;
+
+    match post_result {
+        Ok(_) => trace!("commit status updated to {state:?}"),
+        Err(e) => error!(cause = e.to_string(), "error updating status to {state:?}"),
+    }
+}
+
+/// Posts a comment to a GitHub issue and logs the result
+pub async fn post_comment(comments_url: &str, body: String, octocrab: &Octocrab) {
+    let comment_result: Result<serde_json::Value, _> = octocrab
+        .post(comments_url, Some(&json!({ "body": body })))
+        .await;
+
+    match comment_result {
+        Ok(_) => debug!("comment posted to {comments_url}"),
+        Err(e) => error!(
+            cause = e.to_string(),
+            "error posting comment to {comments_url}"
+        ),
+    }
+}
+
+/// Returns true if the webhook signature is valid
+pub fn verify_webhook_signature(body: &[u8], signature: &str, secret: &str) -> bool {
+    debug!("verifying webhook signature: {signature}");
+
+    // Signatures always start with sha256=
+    let signature = &signature[7..];
+    let Ok(signature_bytes) = hex::decode(signature) else {
+        return false;
+    };
+
+    // Safe to unwrap because any key is valid
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+
+    mac.update(body);
+    let output = mac.finalize_fixed();
+    debug!("computed signature: {:?}", hex::encode(output.as_slice()));
+
+    signature_bytes == output.as_slice()
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn parse_comment_created_without_pr_event() {
+        let payload = include_str!("test/data/webhook_payloads/issue_comment_without_pr.json");
+        let parsed: CommentEvent = serde_json::from_str(payload).unwrap();
+        assert_eq!(parsed.action, "created");
+        assert_eq!(parsed.comment.body, "Comment 1");
+        assert_eq!(parsed.comment.author_association, "OWNER");
+        assert_eq!(parsed.issue.number, 4);
+        assert!(parsed.issue.pull_request.is_none());
+    }
+
+    #[test]
+    fn parse_comment_created_event() {
+        let payload = include_str!("test/data/webhook_payloads/issue_comment.json");
+        let parsed: CommentEvent = serde_json::from_str(payload).unwrap();
+        assert_eq!(parsed.action, "{{action}}");
+        assert_eq!(
+            parsed.issue.pull_request.unwrap().url,
+            "{{pull-request-url}}"
+        );
+    }
+
+    #[test]
+    fn parse_push_event() {
+        let payload = include_str!("test/data/webhook_payloads/push.json");
+        let parsed: PushEvent = serde_json::from_str(payload).unwrap();
+        assert_eq!(parsed.git_ref, "refs/heads/main");
+        assert!(!parsed.deleted);
+    }
+}

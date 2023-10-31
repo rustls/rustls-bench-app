@@ -1,0 +1,42 @@
+---
+- hosts: 'all'
+  become: true
+  vars:
+    hostname: 'rustls-perf.ochagavia.nl'
+    letsencrypt_email: 'le@adolfo.ochagavia.nl'
+    app_user: 'ci-bench-runner'
+  vars_files:
+    - 'secrets.yml'
+  tasks:
+  - name: 'configure CPU frequency scaling'
+    import_role:
+      name: 'cpufreq'
+    tags:
+      - 'cpufreq'
+  - name: 'install and configure nginx + certbot'
+    import_role:
+      name: 'nginx'
+    tags:
+      - 'nginx'
+  - name: 'create user'
+    user:
+      name: '{{app_user}}'
+      shell: '/sbin/nologin'
+      password: '!'
+      append: false
+      # A home directory is needed for rustup and cargo
+      create_home: true
+      state: 'present'
+    tags:
+      - 'rustup'
+      - 'deploy'
+  - name: 'install rustup / update rust toolchain'
+    import_role:
+      name: 'rustup'
+    tags:
+      - 'rustup'
+  - name: 'deploy benchmarking application'
+    import_role:
+      name: 'deploy'
+    tags:
+      - 'deploy'

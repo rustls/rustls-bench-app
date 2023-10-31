@@ -1,0 +1,8 @@
+[Unit]
+Description=set CPU scaling governor to performance upon startup
+
+[Service]
+ExecStart=/usr/local/bin/set-scaling-governor.sh
+
+[Install]
+WantedBy=multi-user.target
