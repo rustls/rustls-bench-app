@@ -4,7 +4,7 @@
   "path_to_db": ":memory:",
   "webhook_secret": "{{ webhook_secret }}",
   "github_app_id": {{ github_app_id }},
-  "github_app_key": "{{ github_app_key }}",
+  "github_app_key": "{{ github_app_key.replace('\n', '\\n') }}",
   "github_repo_owner": "{{ github_repo_owner }}",
   "github_repo_name": "{{ github_repo_name }}",
   "sentry_dsn": "{{ sentry_dsn }}",
