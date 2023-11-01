@@ -49,7 +49,7 @@
     "active_lock_reason": null,
     "draft": false,
     "pull_request": {
-      "url": "{{pull-request-url}}",
+      "url": "https://example.com",
       "html_url": "https://github.com/aochagavia/rustls/pull/7",
       "diff_url": "https://github.com/aochagavia/rustls/pull/7.diff",
       "patch_url": "https://github.com/aochagavia/rustls/pull/7.patch",

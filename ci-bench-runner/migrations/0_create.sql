@@ -48,3 +48,10 @@ CREATE TABLE jobs(
     created_utc TEXT NOT NULL,
     finished_utc TEXT
 ) STRICT;
+
+CREATE TABLE result_comments(
+    pr_number INTEGER NOT NULL,
+    comment_id INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX idx_result_comments_by_number ON result_comments(pr_number);

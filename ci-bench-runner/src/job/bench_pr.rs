@@ -18,7 +18,7 @@ use tracing::{debug, error, info, trace};
 
 use crate::db::{BenchResult, CompareResult, ScenarioDiff, ScenarioKind};
 use crate::event_queue::JobContext;
-use crate::github::{post_comment, update_commit_status, CommentEvent, PullRequestReviewEvent};
+use crate::github::{self, update_commit_status, CommentEvent, PullRequestReviewEvent};
 use crate::job::read_results;
 use crate::runner::{BenchRunner, Log};
 use crate::RepoAndSha;
@@ -47,7 +47,7 @@ pub async fn handle_issue_comment(ctx: JobContext<'_>) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let Some(pr) = payload.issue.pull_request else {
+    if payload.issue.pull_request.is_none() {
         trace!("The comment was to a plain issue (not to a PR), ignoring event");
         return Ok(());
     };
@@ -71,18 +71,22 @@ pub async fn handle_issue_comment(ctx: JobContext<'_>) -> anyhow::Result<()> {
 
     let octocrab = ctx.octocrab.cached();
     if body.contains("@rustls-bench bench") {
-        let pr: PullRequest = octocrab
-            .get(&pr.url, None::<&()>)
+        let pr = octocrab
+            .pulls(&ctx.config.github_repo_owner, &ctx.config.github_repo_name)
+            .get(payload.issue.number)
             .await
             .context("unable to get PR details")?;
 
         let branches = pr_branches(&pr).ok_or(anyhow!("unable to get PR branch details"))?;
-        bench_pr(ctx, branches, &payload.issue.comments_url).await
+        bench_pr(ctx, pr.number, branches).await
     } else if body.contains("@rustls-bench") {
         debug!("The comment was addressed at rustls-bench, but it is an unknown command!");
         let comment = "Unrecognized command. Available commands are:\n\
         * `@rustls-bench bench`: runs the instruction count benchmarks and reports the results";
-        post_comment(&payload.issue.comments_url, comment.to_string(), &octocrab).await;
+        octocrab
+            .issues(&ctx.config.github_repo_owner, &ctx.config.github_repo_name)
+            .create_comment(payload.issue.number, comment)
+            .await?;
         Ok(())
     } else {
         trace!("The comment was not addressed at rustls-bench");
@@ -129,15 +133,10 @@ pub async fn handle_pr_review(ctx: JobContext<'_>) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let Some(comments_url) = &pr.comments_url else {
-        error!("unable to obtain comments url from payload, ignoring event");
-        return Ok(());
-    };
-
     // Ensure we bench the commit that was reviewed, and not something else
     branches.candidate.commit_sha = payload.review.commit_id;
 
-    bench_pr(ctx, branches, comments_url.as_str()).await
+    bench_pr(ctx, pr.number, branches).await
 }
 
 /// Handle a "PR update"
@@ -184,25 +183,19 @@ pub async fn handle_pr_update(ctx: JobContext<'_>) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let Some(comments_url) = payload.pull_request.comments_url else {
-        error!("unable to obtain comments url from payload, ignoring event");
-        return Ok(());
-    };
-
-    bench_pr(ctx, branches, comments_url.as_str()).await
+    bench_pr(ctx, payload.pull_request.number, branches).await
 }
 
 pub async fn bench_pr(
     ctx: JobContext<'_>,
+    pr_number: u64,
     branches: PrBranches,
-    comments_url: &str,
 ) -> anyhow::Result<()> {
     if branches.baseline.branch_name != "main" {
         trace!("ignoring bench request for PR with non-main base");
         return Ok(());
     }
 
-    let config = ctx.config;
     let octocrab = ctx.octocrab.cached();
     update_commit_status(
         branches.candidate.commit_sha.clone(),
@@ -223,7 +216,7 @@ pub async fn bench_pr(
         Some(result) => Ok(result),
         None => {
             let mut logs = BenchPrLogs::default();
-            bench_pr_and_cache_results(ctx, branches.clone(), &mut logs)
+            bench_pr_and_cache_results(&ctx, branches.clone(), &mut logs)
                 .await
                 .map_err(|error| BenchPrError { error, logs })
         }
@@ -231,22 +224,29 @@ pub async fn bench_pr(
 
     let cachegrind_diff_url = format!(
         "{}/comparisons/{}:{}/cachegrind-diff",
-        config.app_base_url, branches.baseline.commit_sha, branches.candidate.commit_sha
+        ctx.config.app_base_url, branches.baseline.commit_sha, branches.candidate.commit_sha
     );
-    post_comment(
-        comments_url,
-        BenchPrResult {
-            result,
-            branches: branches.clone(),
-        }
-        .into_markdown_comment(&cachegrind_diff_url),
-        &octocrab,
-    )
-    .await;
+    let mut comment = BenchPrResult {
+        result,
+        branches: branches.clone(),
+    }
+    .into_markdown_comment(&cachegrind_diff_url);
+    github::maybe_truncate_comment(&mut comment);
+
+    let issues = octocrab.issues(&ctx.config.github_repo_owner, &ctx.config.github_repo_name);
+    if let Some(comment_id) = ctx.db.result_comment_id(pr_number).await? {
+        issues.update_comment(comment_id, comment).await?;
+    } else {
+        let comment = issues.create_comment(pr_number, comment).await?;
+        ctx.db
+            .store_result_comment_id(pr_number, comment.id)
+            .await?;
+    }
+
     update_commit_status(
         branches.candidate.commit_sha.clone(),
         StatusState::Success,
-        config,
+        ctx.config,
         &octocrab,
     )
     .await;
@@ -255,7 +255,7 @@ pub async fn bench_pr(
 }
 
 async fn bench_pr_and_cache_results(
-    ctx: JobContext<'_>,
+    ctx: &JobContext<'_>,
     branches: PrBranches,
     logs: &mut BenchPrLogs,
 ) -> anyhow::Result<CompareResult> {
@@ -268,7 +268,7 @@ async fn bench_pr_and_cache_results(
     let significance_thresholds = calculate_significance_thresholds(historical_results);
 
     let job_output_dir = ctx.job_output_dir.clone();
-    let runner = ctx.bench_runner;
+    let runner = ctx.bench_runner.clone();
     let branches_cloned = branches.clone();
     let (result, task_logs) = tokio::task::spawn_blocking(move || {
         let mut logs = BenchPrLogs::default();

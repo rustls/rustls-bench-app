@@ -27,8 +27,10 @@ use crate::{
 };
 
 mod api {
-    pub static PULL_REQUEST: &str = include_str!("data/api_payloads/pull_request.json");
     pub static INSTALLATION: &str = include_str!("data/api_payloads/app_installation.json");
+
+    pub static CREATE_COMMENT: &str = include_str!("data/api_payloads/create_comment.json");
+    pub static PULL_REQUEST: &str = include_str!("data/api_payloads/pull_request.json");
 }
 
 mod webhook {
@@ -47,54 +49,30 @@ mod webhook {
         PUSH.replace("{{repo}}", &MockGitHub::repo_path())
     }
 
-    pub fn comment(
-        comment: &str,
-        action: &str,
-        base_url: &str,
-        author_association: &str,
-    ) -> String {
+    pub fn comment(comment: &str, action: &str, author_association: &str) -> String {
         ISSUE_COMMENT
-            .replace("{{comments-url}}", &comments_url(base_url))
             .replace("{{author-association}}", author_association)
             .replace("{{action}}", action)
-            .replace(
-                "{{pull-request-url}}",
-                &format!("{base_url}/repos/{}/pulls/42", MockGitHub::repo_path()),
-            )
             .replace("{{comment-body}}", comment)
     }
 
-    pub fn pull_request_opened(base_url: &str) -> String {
+    pub fn pull_request_opened() -> String {
         PULL_REQUEST_OPENED
-            .replace("{{comments-url}}", &comments_url(base_url))
             .replace("{{base-repo}}", &MockGitHub::repo_path())
             .replace("{{head-repo}}", &MockGitHub::repo_path())
     }
 
-    pub fn pull_request_synchronized(base_url: &str) -> String {
+    pub fn pull_request_synchronized() -> String {
         PULL_REQUEST_SYNCHRONIZE
-            .replace("{{comments-url}}", &comments_url(base_url))
             .replace("{{base-repo}}", &MockGitHub::repo_path())
             .replace("{{head-repo}}", &MockGitHub::repo_path())
     }
 
-    pub fn pull_request_review(base_url: &str) -> String {
+    pub fn pull_request_review() -> String {
         PULL_REQUEST_REVIEW
-            .replace("{{comments-url}}", &comments_url(base_url))
             .replace("{{base-repo}}", &MockGitHub::repo_path())
             .replace("{{head-repo}}", &MockGitHub::repo_path())
             .replace("{{author-association}}", "OWNER")
-            .replace(
-                "{{pull-request-url}}",
-                &format!("{base_url}/repos/{}/pulls/42", MockGitHub::repo_path()),
-            )
-    }
-
-    fn comments_url(base_url: &str) -> String {
-        format!(
-            "{base_url}/repos/{}/issues/42/comments",
-            MockGitHub::repo_path()
-        )
     }
 }
 
@@ -188,7 +166,7 @@ async fn test_issue_comment_unauthorized_user() {
 
     // Post the webhook event
     let client = reqwest::Client::default();
-    let event = webhook::comment("@rustls-bench bench", "created", &mock_github.url(), "NONE");
+    let event = webhook::comment("@rustls-bench bench", "created", "NONE");
     post_webhook(
         &client,
         &server.base_url,
@@ -213,7 +191,7 @@ async fn test_issue_comment_edited() {
 
     // Post the webhook event
     let client = reqwest::Client::default();
-    let event = webhook::comment("@rustls-bench bench", "edit", &mock_github.url(), "OWNER");
+    let event = webhook::comment("@rustls-bench bench", "edit", "OWNER");
     post_webhook(
         &client,
         &server.base_url,
@@ -241,12 +219,7 @@ async fn test_issue_comment_happy_path() {
 
     // Post the webhook event
     let client = reqwest::Client::default();
-    let event = webhook::comment(
-        "@rustls-bench bench",
-        "created",
-        &mock_github.url(),
-        "OWNER",
-    );
+    let event = webhook::comment("@rustls-bench bench", "created", "OWNER");
     post_webhook(
         &client,
         &server.base_url,
@@ -267,15 +240,15 @@ async fn test_issue_comment_happy_path() {
         .await
         .ok();
 
-    // Assert that the mocks were used and assert any errors
+    // Assert that the mocks were used and report any errors
     mock_github.server.verify().await;
 }
 
 #[tokio::test]
-async fn test_pr_opened_happy_path() {
+async fn test_pr_opened_happy_path_with_comment_reuse() {
     // Mock HTTP responses from GitHub
     let mock_github = MockGitHub::start().await;
-    let post_comment = mock_github.mock_post_comment().await;
+    let _post_comment = mock_github.mock_post_comment().await;
     let post_status = mock_github.mock_post_status().await;
 
     // Run the job server
@@ -283,25 +256,39 @@ async fn test_pr_opened_happy_path() {
 
     // Post the webhook event
     let client = reqwest::Client::default();
-    let event = webhook::pull_request_opened(&mock_github.url());
     post_webhook(
         &client,
         &server.base_url,
         &server.config.webhook_secret,
-        event,
+        webhook::pull_request_opened(),
         "pull_request",
     )
     .await;
 
-    // Wait for our mock endpoints to have been called
-    tokio::time::timeout(Duration::from_secs(1), post_comment.wait_until_satisfied())
-        .await
-        .ok();
+    // Wait for our post status endpoint to have been called
     tokio::time::timeout(Duration::from_secs(1), post_status.wait_until_satisfied())
         .await
         .ok();
 
-    // Assert that the mocks were used and assert any errors
+    // Second webhook event
+    let _update_comment = mock_github.mock_update_comment().await;
+    drop(post_status);
+    let post_status = mock_github.mock_post_status().await;
+    post_webhook(
+        &client,
+        &server.base_url,
+        &server.config.webhook_secret,
+        webhook::pull_request_opened(),
+        "pull_request",
+    )
+    .await;
+
+    // Wait for our post status endpoint to have been called
+    tokio::time::timeout(Duration::from_secs(1), post_status.wait_until_satisfied())
+        .await
+        .ok();
+
+    // Assert that the mocks were used and report any errors
     mock_github.server.verify().await;
 }
 
@@ -317,12 +304,11 @@ async fn test_pr_synchronize_happy_path() {
 
     // Post the webhook event
     let client = reqwest::Client::default();
-    let event = webhook::pull_request_synchronized(&mock_github.url());
     post_webhook(
         &client,
         &server.base_url,
         &server.config.webhook_secret,
-        event,
+        webhook::pull_request_synchronized(),
         "pull_request",
     )
     .await;
@@ -335,7 +321,7 @@ async fn test_pr_synchronize_happy_path() {
         .await
         .ok();
 
-    // Assert that the mocks were used and assert any errors
+    // Assert that the mocks were used and report any errors
     mock_github.server.verify().await;
 }
 
@@ -373,12 +359,11 @@ async fn test_pr_synchronize_cached() {
 
     // Post the webhook event
     let client = reqwest::Client::default();
-    let event = webhook::pull_request_synchronized(&mock_github.url());
     post_webhook(
         &client,
         &server.base_url,
         &server.config.webhook_secret,
-        event,
+        webhook::pull_request_synchronized(),
         "pull_request",
     )
     .await;
@@ -391,7 +376,7 @@ async fn test_pr_synchronize_cached() {
         .await
         .ok();
 
-    // Assert that the mocks were used and assert any errors
+    // Assert that the mocks were used and report any errors
     mock_github.server.verify().await;
 }
 
@@ -407,12 +392,11 @@ async fn test_pr_review_happy_path() {
 
     // Post the webhook event
     let client = reqwest::Client::default();
-    let event = webhook::pull_request_review(&mock_github.url());
     post_webhook(
         &client,
         &server.base_url,
         &server.config.webhook_secret,
-        event,
+        webhook::pull_request_review(),
         "pull_request_review",
     )
     .await;
@@ -425,7 +409,7 @@ async fn test_pr_review_happy_path() {
         .await
         .ok();
 
-    // Assert that the mocks were used and assert any errors
+    // Assert that the mocks were used and report any errors
     mock_github.server.verify().await;
 }
 
@@ -688,7 +672,10 @@ impl MockGitHub {
 
     async fn mock_get_pr(&self) -> MockGuard {
         let get_pull_request = Mock::given(method("GET"))
-            .and(path(format!("/repos/{}/pulls/42", Self::repo_path())))
+            .and(path_regex(format!(
+                r"/repos/{}/pulls/\d+",
+                Self::repo_path()
+            )))
             .respond_with(ResponseTemplate::new(200).set_body_string(pull_request()))
             .expect(1);
 
@@ -710,14 +697,29 @@ impl MockGitHub {
 
     async fn mock_post_comment(&self) -> MockGuard {
         let post_comment = Mock::given(method("POST"))
-            .and(path(format!(
-                "/repos/{}/issues/42/comments",
+            .and(path_regex(format!(
+                r"/repos/{}/issues/\d+/comments",
                 Self::repo_path()
             )))
             .and(body_string_contains(
                 "Significant instruction count differences",
             ))
-            .respond_with(ResponseTemplate::new(201).set_body_string("{}"))
+            .respond_with(ResponseTemplate::new(201).set_body_string(api::CREATE_COMMENT))
+            .expect(1);
+
+        self.server.register_as_scoped(post_comment).await
+    }
+
+    async fn mock_update_comment(&self) -> MockGuard {
+        let post_comment = Mock::given(method("POST"))
+            .and(path_regex(format!(
+                r"/repos/{}/issues/comments/\d+",
+                Self::repo_path()
+            )))
+            .and(body_string_contains(
+                "Significant instruction count differences",
+            ))
+            .respond_with(ResponseTemplate::new(201).set_body_string(api::CREATE_COMMENT))
             .expect(1);
 
         self.server.register_as_scoped(post_comment).await
@@ -747,7 +749,7 @@ impl TestServer {
 
         let mut sqlite = SqliteConnection::connect("sqlite::memory:").await.unwrap();
         MIGRATOR.run(&mut sqlite).await.unwrap();
-        let sqlite = Arc::new(tokio::sync::Mutex::new(sqlite));
+        let sqlite = Arc::new(Mutex::new(sqlite));
 
         // Mock GitHub endpoints related to the app and its installations
         let mock_get_app = github.mock_get_app_installation().await;

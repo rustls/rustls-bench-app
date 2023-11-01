@@ -8,7 +8,6 @@ use octocrab::models::pulls::PullRequest;
 use octocrab::models::{InstallationId, StatusState};
 use octocrab::Octocrab;
 use serde::Deserialize;
-use serde_json::json;
 use sha2::digest::FixedOutput;
 use sha2::Sha256;
 use tracing::{debug, error, trace, warn};
@@ -56,7 +55,6 @@ pub struct Comment {
 pub struct Issue {
     pub number: u64,
     pub pull_request: Option<PullRequestLite>,
-    pub comments_url: String,
 }
 
 #[derive(Deserialize)]
@@ -175,18 +173,14 @@ pub async fn update_commit_status(
     }
 }
 
-/// Posts a comment to a GitHub issue and logs the result
-pub async fn post_comment(comments_url: &str, body: String, octocrab: &Octocrab) {
-    let comment_result: Result<serde_json::Value, _> = octocrab
-        .post(comments_url, Some(&json!({ "body": body })))
-        .await;
+/// Truncates a comment if it exceeds GitHub's size limit
+pub fn maybe_truncate_comment(body: &mut String) {
+    const GITHUB_COMMENT_MAX_LEN: usize = 65536;
 
-    match comment_result {
-        Ok(_) => debug!("comment posted to {comments_url}"),
-        Err(e) => error!(
-            cause = e.to_string(),
-            "error posting comment to {comments_url}"
-        ),
+    if body.len() > GITHUB_COMMENT_MAX_LEN {
+        let prepend = format!("_Note: the comment has been truncated to respect GitHub's size limit of {GITHUB_COMMENT_MAX_LEN} bytes._");
+        body.truncate(GITHUB_COMMENT_MAX_LEN - prepend.len());
+        body.insert_str(0, &prepend);
     }
 }
 
@@ -230,10 +224,6 @@ mod test {
         let payload = include_str!("test/data/webhook_payloads/issue_comment.json");
         let parsed: CommentEvent = serde_json::from_str(payload).unwrap();
         assert_eq!(parsed.action, "{{action}}");
-        assert_eq!(
-            parsed.issue.pull_request.unwrap().url,
-            "{{pull-request-url}}"
-        );
     }
 
     #[test]

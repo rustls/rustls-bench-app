@@ -47,11 +47,10 @@ The following features are supported:
   - A maintainer leaves a GitHub review approving the PR.
   - A maintainer posts a comment to the PR including `@rustls-bench bench` as part of the body. This
     can be used as a fallback mechanism when the triggers mentioned above are not enough.
-- Report comparison results in a comment to the relevant PR.
+- Report comparison results in a comment to the relevant PR, reusing the same comment when new
+  results are available.
 
 Interesting ideas for later:
 
 - Compile the benchmarks using different C toolchains, like GCC and LLVM (we are currently using the
   system's GCC).
-- Report the results as a single comment, updated whenever new results are available (we are
-  currently posting a separate comment for each benchmark run).

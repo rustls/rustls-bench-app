@@ -40,7 +40,7 @@
     }
   },
   "pull_request": {
-    "url": "{{pull-request-url}}",
+    "url": "https://example.com",
     "id": 1552024466,
     "node_id": "PR_kwDOKEq8uc5cggOS",
     "html_url": "https://github.com/{{base-repo}}/pull/7",
@@ -95,7 +95,7 @@
     "commits_url": "https://api.github.com/repos/{{base-repo}}/pulls/7/commits",
     "review_comments_url": "https://api.github.com/repos/{{base-repo}}/pulls/7/comments",
     "review_comment_url": "https://api.github.com/repos/{{base-repo}}/pulls/comments{/number}",
-    "comments_url": "{{comments-url}}",
+    "comments_url": "https://example.com",
     "statuses_url": "https://api.github.com/repos/{{base-repo}}/statuses/0faa8789b503ac9472eca28e4c2145dc7c347649",
     "head": {
       "label": "rustls-bot:patch-1",
@@ -396,7 +396,7 @@
         "href": "https://api.github.com/repos/{{base-repo}}/issues/7"
       },
       "comments": {
-        "href": "{{comments-url}}"
+        "href": "https://example.com"
       },
       "review_comments": {
         "href": "https://api.github.com/repos/{{base-repo}}/pulls/7/comments"

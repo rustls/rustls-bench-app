@@ -2,6 +2,7 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context};
+use octocrab::models::CommentId;
 use serde::Serialize;
 use serde_json::json;
 use sqlx::sqlite::SqliteRow;
@@ -441,6 +442,43 @@ impl Db {
         Ok(Some(row.try_get("cachegrind_diff")?))
     }
 
+    #[tracing::instrument(skip(self))]
+    pub async fn store_result_comment_id(
+        &self,
+        pr_number: u64,
+        comment_id: CommentId,
+    ) -> anyhow::Result<()> {
+        let mut conn = self.sqlite.lock().await;
+        sqlx::query("INSERT INTO result_comments (pr_number, comment_id) VALUES (?, ?)")
+            .bind(pr_number as i64)
+            .bind(comment_id.into_inner() as i64)
+            .execute(conn.deref_mut())
+            .await?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self), ret)]
+    pub async fn result_comment_id(&self, pr_number: u64) -> anyhow::Result<Option<CommentId>> {
+        let mut conn = self.sqlite.lock().await;
+        let row = sqlx::query(
+            r"
+            SELECT comment_id
+            FROM result_comments
+            WHERE pr_number = ?",
+        )
+        .bind(pr_number as i64)
+        .fetch_optional(conn.deref_mut())
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let comment_id: i64 = row.try_get("comment_id")?;
+        Ok(Some((comment_id as u64).into()))
+    }
+
     #[cfg(test)]
     pub async fn jobs(&self) -> anyhow::Result<Vec<BenchJob>> {
         let mut conn = self.sqlite.lock().await;
@@ -628,6 +666,22 @@ mod test {
         );
         assert_eq!(comparison.diffs.len(), 1);
         assert_eq!(comparison.diffs[0], diffs[0]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_store_load_result_comment_id_round_trips() -> anyhow::Result<()> {
+        let db = empty_db().await;
+
+        let original_comment_id = 100.into();
+        db.store_result_comment_id(42, original_comment_id).await?;
+        let comment_id = db.result_comment_id(42).await?;
+
+        assert_eq!(comment_id, Some(original_comment_id));
+
+        let comment_id = db.result_comment_id(43).await?;
+        assert_eq!(comment_id, None);
 
         Ok(())
     }

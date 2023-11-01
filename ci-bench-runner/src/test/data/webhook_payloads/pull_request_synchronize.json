@@ -57,7 +57,7 @@
     "commits_url": "https://api.github.com/repos/{{base-repo}}/pulls/7/commits",
     "review_comments_url": "https://api.github.com/repos/{{base-repo}}/pulls/7/comments",
     "review_comment_url": "https://api.github.com/repos/{{base-repo}}/pulls/comments{/number}",
-    "comments_url": "{{comments-url}}",
+    "comments_url": "https://example.com",
     "statuses_url": "https://api.github.com/repos/{{base-repo}}/statuses/b0b69e925b2c9c6187cb16f361dd36e156f8e097",
     "head": {
       "label": "rustls-bot:patch-1",
