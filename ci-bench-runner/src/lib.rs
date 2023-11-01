@@ -7,8 +7,10 @@ mod github;
 mod job;
 mod runner;
 
+use anyhow::Context;
 use std::future::Future;
 use std::net::SocketAddr;
+use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -43,6 +45,8 @@ struct AppState {
 /// The application's configuration
 #[derive(Deserialize)]
 pub struct AppConfig {
+    /// Base URL used for the GitHub API (used to mock out the API in tests)
+    pub github_api_url_override: Option<String>,
     /// Base URL of the application (used to generate links)
     pub app_base_url: String,
     /// Local directory where job output will be stored
@@ -66,19 +70,27 @@ pub struct AppConfig {
 }
 
 /// Creates a new instance of the HTTP server and returns the address at which it is listening
-pub fn server(
+pub async fn server(
     config: Arc<AppConfig>,
-    octocrab: CachedOctocrab,
     bench_runner: Arc<dyn BenchRunner>,
     sqlite: Arc<Mutex<SqliteConnection>>,
-) -> (impl Future<Output = Result<(), hyper::Error>>, SocketAddr) {
+) -> anyhow::Result<(impl Future<Output = Result<(), hyper::Error>>, SocketAddr)> {
     let port = config.port.unwrap_or(0);
 
+    // Run any pending DB migrations
+    let mut sqlite_locked = sqlite.lock().await;
+    MIGRATOR
+        .run(sqlite_locked.deref_mut())
+        .await
+        .context("failed to apply DB migration")?;
+    drop(sqlite_locked);
+
     // Set up dependencies
+    let octocrab = CachedOctocrab::new(&config).await?;
     let db = Db::with_connection(sqlite);
     let event_queue = EventQueue::new(config.clone(), db.clone(), bench_runner, octocrab);
 
-    // The application's state, accessible when handling requests
+    // Create the application's state, accessible when handling requests
     let state = Arc::new(AppState {
         config,
         event_queue,
@@ -101,7 +113,7 @@ pub fn server(
     let addr = server.local_addr();
 
     info!("listening on port {}", addr.port());
-    (server, addr)
+    Ok((server, addr))
 }
 
 /// Returns status information about the job

@@ -20,11 +20,9 @@ use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, MockGuard, MockServer, ResponseTemplate};
 
 use crate::db::{ScenarioDiff, ScenarioKind};
-use crate::github::CachedOctocrab;
 use crate::runner::{BenchRunner, Log};
 use crate::{
-    server, AppConfig, CommitIdentifier, Db, MIGRATOR, WEBHOOK_EVENT_HEADER,
-    WEBHOOK_SIGNATURE_HEADER,
+    server, AppConfig, CommitIdentifier, Db, WEBHOOK_EVENT_HEADER, WEBHOOK_SIGNATURE_HEADER,
 };
 
 mod api {
@@ -603,8 +601,9 @@ fn sign(secret: &str, payload: &[u8]) -> Vec<u8> {
     mac.finalize_fixed().to_vec()
 }
 
-fn test_config(tmp_path: &Path) -> Arc<AppConfig> {
+fn test_config(tmp_path: &Path, github_url: String) -> Arc<AppConfig> {
     Arc::new(AppConfig {
+        github_api_url_override: Some(github_url),
         app_base_url: "https://example.com".to_string(),
         job_output_dir: tmp_path.join("logs"),
         path_to_db: ":memory:".to_string(),
@@ -743,27 +742,22 @@ impl TestServer {
     async fn start(github: &MockGitHub) -> Self {
         // Dependencies
         let tmp = TempDir::new().unwrap();
-        let config = test_config(tmp.path());
+        let config = test_config(tmp.path(), github.url());
         fs::create_dir(&config.job_output_dir).unwrap();
 
         let mock_bench_runner = Arc::new(MockBenchRunner::new());
 
-        let mut sqlite = SqliteConnection::connect("sqlite::memory:").await.unwrap();
-        MIGRATOR.run(&mut sqlite).await.unwrap();
+        let sqlite = SqliteConnection::connect("sqlite::memory:").await.unwrap();
         let sqlite = Arc::new(Mutex::new(sqlite));
 
         // Mock GitHub endpoints related to the app and its installations
         let mock_get_app = github.mock_get_app_installation().await;
         let mock_get_token = github.mock_get_access_token().await;
 
-        let (server, server_addr) = server(
-            config.clone(),
-            CachedOctocrab::new(Some(&github.url()), &config)
+        let (server, server_addr) =
+            server(config.clone(), mock_bench_runner.clone(), sqlite.clone())
                 .await
-                .unwrap(),
-            mock_bench_runner.clone(),
-            sqlite.clone(),
-        );
+                .unwrap();
 
         tokio::spawn(server);
 

@@ -8,7 +8,7 @@ use sqlx::{Connection, SqliteConnection};
 use tokio::sync::Mutex;
 use tracing_subscriber::prelude::*;
 
-use ci_bench_runner::{server, AppConfig, CachedOctocrab, LocalBenchRunner, MIGRATOR};
+use ci_bench_runner::{server, AppConfig, LocalBenchRunner};
 
 fn main() -> anyhow::Result<()> {
     // Load the application's configuration
@@ -39,25 +39,18 @@ fn main() -> anyhow::Result<()> {
         .build()?;
 
     rt.block_on(async {
-        // Initialize our GitHub client, which includes a background task to refresh authentication
-        // tokens
-        let octocrab = CachedOctocrab::new(None, &config).await?;
+        let sqlite = SqliteConnection::connect(&format!("sqlite:{}", config.path_to_db)).await?;
 
-        // Initialize SQLite and run any pending DB migrations
-        let mut sqlite =
-            SqliteConnection::connect(&format!("sqlite:{}", config.path_to_db)).await?;
-        MIGRATOR
-            .run(&mut sqlite)
-            .await
-            .context("failed to apply DB migration")?;
-
+        // Initialize the server
         let (server, _) = server(
             config,
-            octocrab,
             Arc::new(LocalBenchRunner),
             Arc::new(Mutex::new(sqlite)),
-        );
+        )
+        .await
+        .context("unable to initialize server")?;
 
+        // Listen
         server.await.context("server crashed")?;
 
         Ok(())

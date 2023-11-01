@@ -98,16 +98,12 @@ impl CachedOctocrab {
     /// This constructor queries the GitHub API to obtain the app installation id and a fresh token
     /// corresponding to it. It also spawns a background tokio task that regularly refreshes
     /// the token.
-    pub async fn new(
-        github_api_base_url: Option<&str>,
-        config: &AppConfig,
-    ) -> anyhow::Result<Self> {
+    pub async fn new(config: &AppConfig) -> anyhow::Result<Self> {
         let key = EncodingKey::from_rsa_pem(config.github_app_key.as_bytes())
             .context("error parsing GitHub App key")?;
         let mut octocrab_builder = Octocrab::builder().app(config.github_app_id.into(), key);
 
-        if let Some(base_url) = github_api_base_url {
-            // Overriding GitHub's url is necessary to mock API requests in tests
+        if let Some(base_url) = &config.github_api_url_override {
             octocrab_builder = octocrab_builder.base_uri(base_url).context("invalid url")?;
         }
 
