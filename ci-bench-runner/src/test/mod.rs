@@ -741,7 +741,6 @@ impl TestServer {
         // Dependencies
         let tmp = TempDir::new().unwrap();
         let config = test_config(tmp.path());
-        fs::create_dir(&config.path_to_main_results).unwrap();
         fs::create_dir(&config.job_output_dir).unwrap();
 
         let mock_bench_runner = Arc::new(MockBenchRunner::new());
