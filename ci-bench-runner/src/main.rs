@@ -6,6 +6,8 @@ use anyhow::Context;
 use sentry::types::Dsn;
 use sqlx::{Connection, SqliteConnection};
 use tokio::sync::Mutex;
+use tracing::Level;
+use tracing_subscriber::filter::Targets;
 use tracing_subscriber::prelude::*;
 
 use ci_bench_runner::{server, AppConfig, LocalBenchRunner};
@@ -28,8 +30,8 @@ fn main() -> anyhow::Result<()> {
 
     // Initialize tracing, dumping traces to stdout as well as to Sentry
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(sentry_tracing::layer())
+        .with(tracing_subscriber::fmt::layer().with_filter(filter()))
+        .with(sentry_tracing::layer().with_filter(filter()))
         .init();
 
     // We use a single-threaded runtime, since we expect a low volume of requests and we want the
@@ -55,6 +57,14 @@ fn main() -> anyhow::Result<()> {
 
         Ok(())
     })
+}
+
+fn filter() -> Targets {
+    Targets::default()
+        .with_target("ci_bench_runner", Level::TRACE)
+        .with_target("sqlx", Level::DEBUG)
+        .with_target("octocrab", Level::DEBUG)
+        .with_default(Level::INFO)
 }
 
 fn cwd() -> String {
