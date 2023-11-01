@@ -41,7 +41,10 @@ async fn tokio_main(config: AppConfig) -> anyhow::Result<()> {
     let octocrab = CachedOctocrab::new(None, &config).await?;
 
     let mut sqlite = SqliteConnection::connect(&format!("sqlite:{}", config.path_to_db)).await?;
-    MIGRATOR.run(&mut sqlite).await.unwrap();
+    MIGRATOR
+        .run(&mut sqlite)
+        .await
+        .context("failed to apply DB migration")?;
 
     let (server, _) = server(
         config,
