@@ -1,3 +1,6 @@
+- name: 'Install valgrind'
+  apt:
+    name: valgrind
 - name: 'create app directory'
   file:
     path: /home/{{app_user}}/server
