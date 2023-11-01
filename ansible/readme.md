@@ -32,8 +32,9 @@ will need to:
 
 Secrets will be injected in the Rust app configuration file, which can be found at
 [`roles/deploy/templates/config.json`](roles/deploy/templates/config.json). If you are deploying the
-app for testing purposes, you will probably need to update some fields like `github_app_id`,
-`github_repo_owner` and `github_repo_name` to match yours.
+app for testing purposes, you will probably need to override some variables like `github_app_id`,
+`github_repo_owner` and `github_repo_name` to match yours. See the [testing](#testing) section for
+more information.
 
 ## General overview
 
@@ -48,3 +49,46 @@ too old.
 - Update Rust to the latest stable version: `ansible-playbook playbook.yml --tags rustup`
 - Deploy a new version of the server: `ansible-playbook playbook.yml --tags deploy`
 - Check the status of the application: `sudo systemctl status ci-bench-runner`
+
+## Testing
+
+In order to test changes to the Ansible playbooks, or the application code, it may be convenient to
+deploy a modified version of this repository to a different server than the production instance. This
+can help avoid disruptions and lets us catch bugs before they affect the production server.
+
+### Setup
+
+Before starting, you will need:
+
+* A clean-slate server running Debian 12 (Bookworm).
+* A domain name that is accessible from the broader internet, with A/AAAA records pointing to the IP
+  address of the server. This is required for Certbot to obtain a HTTPS certificate from Let's Encrypt.
+* A fork of the main [rustls](https://github.com/rustls/rustls) repository that you control.
+* A GitHub application configured according to the [GitHub app](../readme.md#github-app) section of
+  the main README. The application **must** be installed on your fork of the rustls repo, with the required
+  permissions.
+* If testing code changes to the `ci-bench-runner` app or Ansbile playbooks, a fork of this repository that 
+  you control.
+
+### Deployment
+
+To deploy to your test server, copy `inventory.ini` to a new file `test-inventory.ini`, and update 
+the `ansible_host` IP address in `test-inventory.ini` to point to your clean-slate server.
+
+You can then deploy using:
+```bash
+ansible-playbook \
+  --inventory test-inventory.ini \
+  --user root \
+  --extra-vars 'hostname=rustls-bench.example.com' \
+  --extra-vars 'github_repo_owner=example' \
+  --extra_vars 'github_repo_name=rustls' \
+  --extra-vars 'bench_app_repo=https://github.com/example/rustls-bench-app/' \
+  --extra-vars 'bench_app_branch=example-branch' \
+  playbook.yml
+```
+
+* The `hostname` variable should be configured to match the domain name you set up for your test server.
+* The `github_repo_owner` and `github_repo_name` should be configured to match your fork of the main Rustls repo.
+* The `bench_app_repo` and `bench_app_branch` should be configured to match your fork of this repository, and the
+  branch you've pushed with your code changes (if applicable).
