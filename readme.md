@@ -30,6 +30,11 @@ webhook's URL _and_ a secret to ensure event authenticity):
 - Pull request review.
 - Push.
 
+Make sure to set the GitHub webook URL for your application with the correct 
+`/webhooks/github` route, e.g.:
+
+- `https://my-domain.example.com/webhooks/github`
+
 #### Server
 
 To reduce noise, the server should be configured to disable dynamic frequency scaling (also known as
