@@ -54,3 +54,21 @@ Interesting ideas for later:
 
 - Compile the benchmarks using different C toolchains, like GCC and LLVM (we are currently using the
   system's GCC).
+
+## Nix Support
+
+Since this repository requires both Ansible, and Rust, a [Nix flake] is provided
+to offer a self-contained developer environment.
+
+To use:
+1. [Install Nix]
+2. `nix develop`
+3. You're all set! Use `cargo` and `ansible` as needed.
+
+You may also install [Direnv] and `direnv allow` this directory to have the Nix
+developer environment load/unload automatically when you enter/leave the
+directory.
+
+[Nix flake]: https://zero-to-nix.com/concepts/flakes
+[Install Nix]: https://nixos.org/
+[Direnv]: https://direnv.net/

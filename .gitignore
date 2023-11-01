@@ -11,6 +11,7 @@ admin/rustfmt
 /.idea
 /default.profraw
 /.direnv
+/result
 
 ci-bench-runner/config.json
 ansible/secrets.yml
