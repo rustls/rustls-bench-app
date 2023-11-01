@@ -3,10 +3,11 @@
   become: true
   vars:
     hostname: 'rustls-perf.ochagavia.nl'
-    letsencrypt_email: 'le@adolfo.ochagavia.nl'
     app_user: 'ci-bench-runner'
     bench_app_repo: 'https://github.com/aochagavia/rustls-bench-app/'
     bench_app_branch: 'main'
+    github_repo_owner: 'rustls'
+    github_repo_name: 'rustls'
   vars_files:
     - 'secrets.yml'
   tasks:
