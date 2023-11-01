@@ -30,15 +30,6 @@
     group: '{{app_user}}'
   notify:
     - 'start app'
-- name: 'upload app binary'
-  copy:
-    src: '../ci-bench-runner/target/release/ci-bench-runner'
-    dest: '/home/{{app_user}}/server/ci-bench-runner'
-    mode: 'u=rwx,g=r,o=r'
-    owner: '{{app_user}}'
-    group: '{{app_user}}'
-  notify:
-    - 'start app'
 - name: 'upload systemd service file'
   template:
     src: 'ci-bench-runner.service'

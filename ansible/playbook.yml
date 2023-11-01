@@ -5,6 +5,8 @@
     hostname: 'rustls-perf.ochagavia.nl'
     letsencrypt_email: 'le@adolfo.ochagavia.nl'
     app_user: 'ci-bench-runner'
+    bench_app_repo: 'https://github.com/aochagavia/rustls-bench-app/'
+    bench_app_branch: 'main'
   vars_files:
     - 'secrets.yml'
   tasks:
@@ -35,6 +37,11 @@
       name: 'rustup'
     tags:
       - 'rustup'
+  - name: 'build benchmarking application'
+    import_role:
+      name: 'build'
+    tags:
+      - 'deploy'
   - name: 'deploy benchmarking application'
     import_role:
       name: 'deploy'
