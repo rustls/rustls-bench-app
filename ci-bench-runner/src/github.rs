@@ -4,96 +4,110 @@ use std::time::Duration;
 use anyhow::Context;
 use hmac::{Hmac, Mac};
 use jsonwebtoken::EncodingKey;
-use octocrab::models::pulls::PullRequest;
 use octocrab::models::{InstallationId, StatusState};
 use octocrab::Octocrab;
-use serde::Deserialize;
 use sha2::digest::FixedOutput;
 use sha2::Sha256;
 use tracing::{debug, error, trace, warn};
 
 use crate::AppConfig;
 
-#[derive(Deserialize)]
-pub struct PullRequestReviewEvent {
-    pub action: String,
-    pub review: Review,
-    pub pull_request: PullRequest,
+pub mod api {
+    //! Types used to deserialize responses from the GitHub API in cases where Octocrab does not
+    //! provide the necessary fields
+
+    use octocrab::models::pulls::PullRequest;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    pub struct PullRequestReviewEvent {
+        pub action: String,
+        pub review: Review,
+        pub pull_request: PullRequest,
+    }
+
+    #[derive(Deserialize)]
+    pub struct Review {
+        pub author_association: String,
+        pub state: String,
+        pub commit_id: String,
+    }
+
+    #[derive(Deserialize)]
+    pub struct PushEvent {
+        #[serde(rename = "ref")]
+        pub git_ref: String,
+        pub repository: Repo,
+        pub after: String,
+        pub deleted: bool,
+    }
+
+    #[derive(Deserialize)]
+    pub struct CommentEvent {
+        pub action: String,
+        pub comment: Comment,
+        pub issue: Issue,
+    }
+
+    #[derive(Deserialize)]
+    pub struct Comment {
+        pub author_association: String,
+        pub body: String,
+        pub user: GitHubUser,
+    }
+
+    #[derive(Deserialize)]
+    pub struct Issue {
+        pub number: u64,
+        pub pull_request: Option<PullRequestLite>,
+    }
+
+    #[derive(Deserialize)]
+    pub struct PullRequestLite {
+        pub url: String,
+    }
+
+    #[derive(Deserialize)]
+    pub struct GitHubUser {
+        pub login: String,
+    }
+
+    #[derive(Deserialize)]
+    pub struct Repo {
+        pub clone_url: String,
+    }
 }
 
-#[derive(Deserialize)]
-pub struct Review {
-    pub author_association: String,
-    pub state: String,
-    pub commit_id: String,
-}
-
-#[derive(Deserialize)]
-pub struct PushEvent {
-    #[serde(rename = "ref")]
-    pub git_ref: String,
-    pub repository: Repo,
-    pub after: String,
-    pub deleted: bool,
-}
-
-#[derive(Deserialize)]
-pub struct CommentEvent {
-    pub action: String,
-    pub comment: Comment,
-    pub issue: Issue,
-}
-
-#[derive(Deserialize)]
-pub struct Comment {
-    pub author_association: String,
-    pub body: String,
-    pub user: GitHubUser,
-}
-
-#[derive(Deserialize)]
-pub struct Issue {
-    pub number: u64,
-    pub pull_request: Option<PullRequestLite>,
-}
-
-#[derive(Deserialize)]
-pub struct PullRequestLite {
-    pub url: String,
-}
-
-#[derive(Deserialize)]
-pub struct GitHubUser {
-    pub login: String,
-}
-
-#[derive(Deserialize)]
-pub struct Repo {
-    pub clone_url: String,
-}
-
+/// Provides access to an authenticated `Octocrab` client
 #[derive(Clone)]
 pub struct CachedOctocrab {
+    /// Initial GitHub client, authenticated as our GitHub App
     app_client: Octocrab,
+    /// The installation id corresponding to the repository that has installed the GitHub App
     installation_id: InstallationId,
+    /// Regularly refreshed GitHub client, authenticated as an installation of our GitHub app
+    ///
+    /// This is the client that should be used when interacting with the repository (e.g. posting
+    /// comments, setting commit statuses, etc)
     installation_client: Arc<Mutex<Octocrab>>,
 }
 
 impl CachedOctocrab {
-    /// Creates a new CachedOctocrab instance.
+    /// Creates a new [`CachedOctocrab`] instance.
     ///
-    /// This constructor queries the GitHub API before returning in order to retrieve the app
-    /// installation id and a fresh token corresponding to it. It also spawns a background tokio
-    /// task to regularly refresh the token.
+    /// This constructor queries the GitHub API to obtain the app installation id and a fresh token
+    /// corresponding to it. It also spawns a background tokio task that regularly refreshes
+    /// the token.
     pub async fn new(
         github_api_base_url: Option<&str>,
         config: &AppConfig,
     ) -> anyhow::Result<Self> {
-        let key = EncodingKey::from_rsa_pem(config.github_app_key.as_bytes()).unwrap();
+        let key = EncodingKey::from_rsa_pem(config.github_app_key.as_bytes())
+            .context("error parsing GitHub App key")?;
         let mut octocrab_builder = Octocrab::builder().app(config.github_app_id.into(), key);
 
         if let Some(base_url) = github_api_base_url {
-            // Overriding the GitHub's url is necessary to mock API requests in tests
+            // Overriding GitHub's url is necessary to mock API requests in tests
             octocrab_builder = octocrab_builder.base_uri(base_url).context("invalid url")?;
         }
 
@@ -110,7 +124,11 @@ impl CachedOctocrab {
             installation_id: installation.id,
             installation_client: Arc::new(Mutex::new(unauthenticated_client)),
         };
+
+        // Obtain an authenticated client for the first time
         cache.refresh_token().await?;
+
+        // Launch the background process to refresh the client in the background
         cache.clone().refresh_token_in_background();
 
         Ok(cache)
@@ -206,7 +224,7 @@ pub fn verify_webhook_signature(body: &[u8], signature: &str, secret: &str) -> b
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use super::api::*;
 
     #[test]
     fn parse_comment_created_without_pr_event() {

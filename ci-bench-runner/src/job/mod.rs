@@ -12,7 +12,7 @@ pub use bench_pr::{handle_issue_comment, handle_pr_review, handle_pr_update};
 mod bench_main;
 mod bench_pr;
 
-/// Reads the (benchmark, instruction count) pairs from previous CSV output
+/// Reads the (benchmark, result) pairs from previous CSV output
 fn read_results(path: &Path) -> anyhow::Result<HashMap<String, f64>> {
     trace!(
         path = path.display().to_string(),

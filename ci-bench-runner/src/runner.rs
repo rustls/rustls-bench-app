@@ -1,45 +1,49 @@
+use std::fmt::Write;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
 use anyhow::{bail, Context};
-use tracing::{debug, error, info};
+use tracing::trace;
 
-use crate::RepoAndSha;
+use crate::CommitIdentifier;
 
 pub trait BenchRunner: Send + Sync {
-    /// Checkout the specified repository at the given ref and run the benchmarks
-    ///
-    /// Returns the hash of the benchmarked commit
+    /// Checks out the specified commit and runs the benchmarks
     fn checkout_and_run_benchmarks(
         &self,
-        repo_and_ref: &RepoAndSha,
-        local_rustls_dir: &Path,
+        commit: &CommitIdentifier,
+        checkout_target_dir: &Path,
         job_output_dir: &Path,
         command_logs: &mut Vec<Log>,
     ) -> anyhow::Result<()>;
 }
 
+/// A bench runner that runs benchmarks locally
 pub struct LocalBenchRunner;
 
 impl BenchRunner for LocalBenchRunner {
     fn checkout_and_run_benchmarks(
         &self,
-        repo_and_ref: &RepoAndSha,
-        local_rustls_dir: &Path,
+        commit: &CommitIdentifier,
+        checkout_target_dir: &Path,
         job_output_dir: &Path,
         command_logs: &mut Vec<Log>,
     ) -> anyhow::Result<()> {
-        info!(
-            "checking out {} at ref {}",
-            repo_and_ref.clone_url, repo_and_ref.commit_sha
+        trace!(
+            "checking out {} at commit {}",
+            commit.clone_url,
+            commit.commit_sha
         );
-        debug!("local repo directory: {}", local_rustls_dir.display());
+        trace!(
+            "checkout target directory: {}",
+            checkout_target_dir.display()
+        );
 
         // Init
         let mut command = Command::new("git");
-        command.arg("init").current_dir(local_rustls_dir);
+        command.arg("init").current_dir(checkout_target_dir);
 
         run_command(command, command_logs)?;
 
@@ -49,35 +53,35 @@ impl BenchRunner for LocalBenchRunner {
             .arg("remote")
             .arg("add")
             .arg("origin")
-            .arg(&repo_and_ref.clone_url)
-            .current_dir(local_rustls_dir);
+            .arg(&commit.clone_url)
+            .current_dir(checkout_target_dir);
 
         run_command(command, command_logs)?;
 
-        // Fetch relevant ref
-        let git_ref = &repo_and_ref.commit_sha;
+        // Fetch relevant commit
+        let git_ref = &commit.commit_sha;
         let mut command = Command::new("git");
         command
             .arg("fetch")
             .arg("origin")
             .arg(git_ref)
-            .current_dir(local_rustls_dir);
+            .current_dir(checkout_target_dir);
 
         run_command(command, command_logs)?;
 
-        // Checkout ref
+        // Checkout commit
         let mut command = Command::new("git");
         command
             .arg("checkout")
             .arg(git_ref)
-            .current_dir(local_rustls_dir);
+            .current_dir(checkout_target_dir);
 
         run_command(command, command_logs)?;
 
         // Build benchmarks
-        let bench_path = local_rustls_dir.join("ci-bench");
-        info!("building ci benchmarks");
-        debug!("ci-bench path: {}", bench_path.display());
+        let bench_path = checkout_target_dir.join("ci-bench");
+        trace!("building ci benchmarks");
+
         let start = Instant::now();
         let mut command = Command::new("cargo");
         command
@@ -88,20 +92,17 @@ impl BenchRunner for LocalBenchRunner {
 
         run_command(command, command_logs)?;
 
-        debug!(
+        trace!(
             "benchmarks built in {:.2} s",
             (Instant::now() - start).as_secs_f64()
         );
 
         // Run benchmarks
-        info!("running ci benchmarks");
-        let bench_exe_path = local_rustls_dir.join("target/release/rustls-ci-bench");
-        debug!("ci-bench executable path: {}", bench_exe_path.display());
-
+        let bench_exe_path = checkout_target_dir.join("target/release/rustls-ci-bench");
         fs::create_dir_all(job_output_dir).context("Unable to create dir for job output")?;
 
         let start = Instant::now();
-        let mut command = Command::new(&bench_exe_path);
+        let mut command = Command::new(bench_exe_path);
         command
             .arg("run-all")
             .arg("--output-dir")
@@ -110,7 +111,7 @@ impl BenchRunner for LocalBenchRunner {
 
         run_command(command, command_logs)?;
 
-        info!(
+        trace!(
             "benchmarks run in {:.2}",
             (Instant::now() - start).as_secs_f64()
         );
@@ -119,14 +120,9 @@ impl BenchRunner for LocalBenchRunner {
     }
 }
 
-pub struct Log {
-    pub command: String,
-    pub cwd: String,
-    pub stdout: Vec<u8>,
-    pub stderr: Vec<u8>,
-}
-
+/// Runs a command and pushes its logs to the provided buffer
 fn run_command(mut command: Command, logs: &mut Vec<Log>) -> anyhow::Result<()> {
+    // Get the command string
     let mut command_str = String::new();
     command_str.push_str(&command.get_program().to_string_lossy());
     for arg in command.get_args() {
@@ -134,13 +130,15 @@ fn run_command(mut command: Command, logs: &mut Vec<Log>) -> anyhow::Result<()> 
         command_str.push_str(&arg.to_string_lossy());
     }
 
+    // Get the command's CWD
     let cwd = command
         .get_current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or("/".to_string());
 
+    // Run the command
     let output = command.output().context(format!(
-        "failed to run command: `{command_str}` at cwd `{cwd}`"
+        "failed to start command: `{command_str}` at cwd `{cwd}`"
     ))?;
 
     logs.push(Log {
@@ -150,12 +148,9 @@ fn run_command(mut command: Command, logs: &mut Vec<Log>) -> anyhow::Result<()> 
         stderr: output.stderr,
     });
 
+    // Propagate errors
     if !output.status.success() {
         let command_str = &logs.last().unwrap().command;
-        error!(
-            "`{command_str}` exited with exit status {:?}",
-            output.status.code()
-        );
         bail!(
             "`{command_str}` exited with exit status {:?}",
             output.status.code()
@@ -163,4 +158,42 @@ fn run_command(mut command: Command, logs: &mut Vec<Log>) -> anyhow::Result<()> 
     }
 
     Ok(())
+}
+
+/// Logs for a specific command
+pub struct Log {
+    /// The command in question
+    pub command: String,
+    /// The current working directory of the command
+    pub cwd: String,
+    /// The command's stdout output
+    pub stdout: Vec<u8>,
+    /// The command's stderr output
+    pub stderr: Vec<u8>,
+}
+
+pub fn write_logs_for_run(s: &mut String, logs: &[Log]) {
+    if logs.is_empty() {
+        writeln!(s, "_Not available_").ok();
+    }
+
+    for log in logs {
+        write_log(s, log);
+    }
+}
+
+fn write_log(s: &mut String, log: &Log) {
+    write_log_part(s, "command", &log.command);
+    write_log_part(s, "cwd", &log.cwd);
+    write_log_part(s, "stdout", &String::from_utf8_lossy(&log.stdout));
+    write_log_part(s, "stderr", &String::from_utf8_lossy(&log.stderr));
+}
+
+fn write_log_part(s: &mut String, part_name: &str, part: &str) {
+    write!(s, "{part_name}:").ok();
+    if part.trim().is_empty() {
+        writeln!(s, " _empty_.\n").ok();
+    } else {
+        writeln!(s, "\n```\n{}\n```\n", part.trim_end()).ok();
+    }
 }

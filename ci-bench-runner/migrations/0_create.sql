@@ -7,7 +7,7 @@ CREATE INDEX idx_bench_runs_created_utc ON bench_runs(created_utc);
 
 CREATE TABLE bench_results(
    bench_run_id BLOB NOT NULL,
-   name TEXT NOT NULL,
+   scenario_name TEXT NOT NULL,
    result REAL NOT NULL,
    FOREIGN KEY (bench_run_id) REFERENCES bench_runs(id)
 ) STRICT;

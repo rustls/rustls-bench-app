@@ -11,11 +11,17 @@ use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+/// An enqueued GitHub event
 pub struct QueuedEvent {
+    /// An internal id for this event (i.e. not GitHub's)
     pub id: Uuid,
+    /// Id of the job that is currently handling the event, if any
     pub job_id: Option<Uuid>,
+    /// The event kind
     pub event: String,
+    /// The Event payload
     pub payload: Vec<u8>,
+    /// The moment at which the event was persisted
     pub created_utc: OffsetDateTime,
 }
 
@@ -40,23 +46,34 @@ impl FromRow<'_, SqliteRow> for QueuedEvent {
     }
 }
 
+/// A benchmarking job
 #[derive(Debug, PartialEq, sqlx::FromRow, Serialize)]
 pub struct BenchJob {
+    /// This job's id
     #[sqlx(try_from = "Vec<u8>")]
     pub id: Uuid,
+    /// The moment at which the GitHub event that triggered this job was enqueued
     pub event_queued_utc: OffsetDateTime,
+    /// The moment at which this job was created
     pub created_utc: OffsetDateTime,
+    /// The moment at which this job finished
     pub finished_utc: Option<OffsetDateTime>,
 }
 
+/// A result for a specific benchmark scenario
 #[derive(sqlx::FromRow)]
 pub struct BenchResult {
-    pub name: String,
+    /// The scenario's name
+    pub scenario_name: String,
+    /// The benchmark's measured result
+    ///
+    /// We use f64 here to support multiple kinds of measurement (i.e. not only instruction counts,
+    /// which are integers)
     pub result: f64,
 }
 
-/// The results of a comparison between two branches of Rustls
-pub struct CompareResult {
+/// The results of a comparison between two branches of rustls
+pub struct ComparisonResult {
     /// The diffs, per scenario
     pub diffs: Vec<ScenarioDiff>,
     /// Benchmark scenarios present in the candidate but missing in the baseline
@@ -67,20 +84,28 @@ pub struct CompareResult {
 /// of rustls
 #[derive(Clone, Debug, PartialEq, sqlx::FromRow)]
 pub struct ScenarioDiff {
+    /// The scenario's name
     pub scenario_name: String,
+    /// The scenario's kind
     #[sqlx(try_from = "i64")]
     pub scenario_kind: ScenarioKind,
+    /// Baseline result for this scenario
     pub baseline_result: f64,
+    /// Candidate result for this scenario
     pub candidate_result: f64,
+    /// Significance threshold derived from history, when the diff was created
     pub significance_threshold: f64,
+    /// Instruction-level cachegrind diff, for icount scenarios
     pub cachegrind_diff: String,
 }
 
 impl ScenarioDiff {
+    /// Returns the measured difference between the candidate and the baseline results
     pub fn diff(&self) -> f64 {
         self.candidate_result - self.baseline_result
     }
 
+    /// Returns the ratio of change respective to the baseline result
     pub fn diff_ratio(&self) -> f64 {
         self.diff() / self.baseline_result
     }
@@ -102,17 +127,19 @@ impl TryFrom<i64> for ScenarioKind {
     }
 }
 
+/// Strongly-typed interface to the database
 #[derive(Clone)]
 pub struct Db {
     sqlite: Arc<Mutex<SqliteConnection>>,
 }
 
 impl Db {
+    /// Creates a new [`Db`] wrapping the provided SQLite connection
     pub fn with_connection(sqlite: Arc<Mutex<SqliteConnection>>) -> Self {
         Self { sqlite }
     }
 
-    /// Store an incoming webhook to the database
+    /// Enqueues an incoming event to the database
     #[tracing::instrument(skip(self, payload), ret)]
     pub async fn enqueue_event(&self, event: &str, payload: &[u8]) -> anyhow::Result<Uuid> {
         let id = Uuid::new_v4();
@@ -132,7 +159,7 @@ impl Db {
         Ok(id)
     }
 
-    /// Retrieve the next incoming webhook we should handle
+    /// Retrieves the next event we should handle
     #[tracing::instrument(skip(self))]
     pub async fn next_queued_event(&self) -> anyhow::Result<QueuedEvent> {
         let mut conn = self.sqlite.lock().await;
@@ -149,6 +176,7 @@ impl Db {
         Ok(event)
     }
 
+    /// Returns the count of currently queued events
     #[tracing::instrument(skip(self), ret)]
     pub async fn queued_event_count(&self) -> anyhow::Result<i64> {
         let mut conn = self.sqlite.lock().await;
@@ -163,7 +191,21 @@ impl Db {
         Ok(row.try_get("count")?)
     }
 
-    /// Create a new job and associate it to the provided event
+    /// Deletes the event from the database
+    ///
+    /// Used to get rid of events once they have been successfully handled
+    #[tracing::instrument(skip(self))]
+    pub async fn delete_event(&self, id: Uuid) -> anyhow::Result<()> {
+        let mut conn = self.sqlite.lock().await;
+        sqlx::query("DELETE FROM event_queue WHERE id = ?")
+            .bind(id.as_bytes().as_slice())
+            .execute(conn.deref_mut())
+            .await?;
+
+        Ok(())
+    }
+
+    /// Creates a job associated to the provided event
     #[tracing::instrument(skip(self), ret)]
     pub async fn new_job_for_event(
         &self,
@@ -175,7 +217,7 @@ impl Db {
         let mut conn = self.sqlite.lock().await;
         conn.transaction(|t| {
             Box::pin(async move {
-                // Create new job
+                // Create job
                 let now = OffsetDateTime::now_utc();
                 sqlx::query(
                     "INSERT INTO jobs (id, event_queued_utc, created_utc) VALUES (?, ?, ?)",
@@ -201,7 +243,7 @@ impl Db {
         Ok(id)
     }
 
-    /// Mark the job as finished
+    /// Marks the job as finished
     #[tracing::instrument(skip(self))]
     pub async fn job_finished(&self, id: Uuid) -> anyhow::Result<()> {
         let finished_utc = OffsetDateTime::now_utc();
@@ -216,15 +258,17 @@ impl Db {
         Ok(())
     }
 
-    /// Retrieve a job by its id
+    /// Retrieves a job by its id
     pub async fn job(&self, id: Uuid) -> anyhow::Result<BenchJob> {
         let job = self
             .maybe_job(id)
             .await?
             .ok_or(anyhow!("job not found: {id}"))?;
+
         Ok(job)
     }
 
+    /// Optionally retrieve a job by its id
     #[tracing::instrument(skip(self), ret)]
     pub async fn maybe_job(&self, id: Uuid) -> anyhow::Result<Option<BenchJob>> {
         let mut conn = self.sqlite.lock().await;
@@ -241,19 +285,7 @@ impl Db {
         Ok(job)
     }
 
-    /// Delete handled webhook from the database
-    #[tracing::instrument(skip(self))]
-    pub async fn delete_event(&self, id: Uuid) -> anyhow::Result<()> {
-        let mut conn = self.sqlite.lock().await;
-        sqlx::query("DELETE FROM event_queue WHERE id = ?")
-            .bind(id.as_bytes().as_slice())
-            .execute(conn.deref_mut())
-            .await?;
-
-        Ok(())
-    }
-
-    /// Store the results of a bench run to the database
+    /// Stores the results of a bench run to the database
     #[tracing::instrument(skip(self, icount_results), ret)]
     pub async fn store_run_results(
         &self,
@@ -264,7 +296,7 @@ impl Db {
         let mut conn = self.sqlite.lock().await;
         conn.transaction(|t| {
             Box::pin(async move {
-                // Create new bench run
+                // Create bench run
                 let now = OffsetDateTime::now_utc();
                 sqlx::query("INSERT INTO bench_runs (id, created_utc) VALUES (?, ?)")
                     .bind(bench_run_id.as_bytes().as_slice())
@@ -273,12 +305,12 @@ impl Db {
                     .await?;
 
                 // Add benchmark results
-                for (name, result) in icount_results {
+                for (scenario_name, result) in icount_results {
                     sqlx::query(
-                        "INSERT INTO bench_results (bench_run_id, name, result) VALUES (?, ?, ?)",
+                        "INSERT INTO bench_results (bench_run_id, scenario_name, result) VALUES (?, ?, ?)",
                     )
                     .bind(bench_run_id.as_bytes().as_slice())
-                    .bind(name)
+                    .bind(scenario_name)
                     .bind(result)
                     .execute(t.deref_mut())
                     .await?;
@@ -301,7 +333,7 @@ impl Db {
         let mut conn = self.sqlite.lock().await;
         let results = sqlx::query_as(
             r"
-            SELECT name, result
+            SELECT scenario_name, result
             FROM bench_results JOIN
                 (SELECT id FROM bench_runs WHERE created_utc > ? ORDER BY created_utc)
             ON id = bench_run_id",
@@ -313,6 +345,7 @@ impl Db {
         Ok(results)
     }
 
+    /// Stores the result of a comparison between two branches of rustls
     #[tracing::instrument(skip(self, diffs))]
     pub async fn store_comparison_result(
         &self,
@@ -330,7 +363,7 @@ impl Db {
         let mut conn = self.sqlite.lock().await;
         let id = conn.transaction(|t| {
             Box::pin(async move {
-                // Create new comparison run
+                // Create comparison run
                 let id = Uuid::new_v4();
                 let now = OffsetDateTime::now_utc();
                 sqlx::query(
@@ -368,12 +401,13 @@ impl Db {
         Ok(id)
     }
 
+    /// Retrieves the result of a comparison between two branches of rustls
     #[tracing::instrument(skip(self))]
     pub async fn comparison_result(
         &self,
         baseline_commit: &str,
         candidate_commit: &str,
-    ) -> anyhow::Result<Option<CompareResult>> {
+    ) -> anyhow::Result<Option<ComparisonResult>> {
         let mut conn = self.sqlite.lock().await;
         let row = sqlx::query(
             r"
@@ -409,12 +443,13 @@ impl Db {
         .fetch_all(conn.deref_mut())
         .await?;
 
-        Ok(Some(CompareResult {
+        Ok(Some(ComparisonResult {
             diffs,
             scenarios_missing_in_baseline,
         }))
     }
 
+    /// Returns the cachegrind diff for the specified comparison and scenario, if available
     #[tracing::instrument(skip(self))]
     pub async fn cachegrind_diff(
         &self,
@@ -442,6 +477,7 @@ impl Db {
         Ok(Some(row.try_get("cachegrind_diff")?))
     }
 
+    /// Stores the id of the comment used to report results for a specific PR
     #[tracing::instrument(skip(self))]
     pub async fn store_result_comment_id(
         &self,
@@ -458,6 +494,7 @@ impl Db {
         Ok(())
     }
 
+    /// Retrieves the id of the comment used to report results for a specific PR, if available
     #[tracing::instrument(skip(self), ret)]
     pub async fn result_comment_id(&self, pr_number: u64) -> anyhow::Result<Option<CommentId>> {
         let mut conn = self.sqlite.lock().await;

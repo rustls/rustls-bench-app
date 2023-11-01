@@ -16,12 +16,13 @@ use tempfile::TempDir;
 use time::{Duration, OffsetDateTime};
 use tracing::{debug, error, info, trace};
 
-use crate::db::{BenchResult, CompareResult, ScenarioDiff, ScenarioKind};
+use crate::db::{BenchResult, ComparisonResult, ScenarioDiff, ScenarioKind};
 use crate::event_queue::JobContext;
-use crate::github::{self, update_commit_status, CommentEvent, PullRequestReviewEvent};
+use crate::github::api::{CommentEvent, PullRequestReviewEvent};
+use crate::github::{self, update_commit_status};
 use crate::job::read_results;
-use crate::runner::{BenchRunner, Log};
-use crate::RepoAndSha;
+use crate::runner::{write_logs_for_run, BenchRunner, Log};
+use crate::CommitIdentifier;
 
 static ALLOWED_AUTHOR_ASSOCIATIONS: &[&str] = &[
     // The owner of the repository
@@ -226,11 +227,7 @@ pub async fn bench_pr(
         "{}/comparisons/{}:{}/cachegrind-diff",
         ctx.config.app_base_url, branches.baseline.commit_sha, branches.candidate.commit_sha
     );
-    let mut comment = BenchPrResult {
-        result,
-        branches: branches.clone(),
-    }
-    .into_markdown_comment(&cachegrind_diff_url);
+    let mut comment = markdown_comment(&branches, result, &cachegrind_diff_url);
     github::maybe_truncate_comment(&mut comment);
 
     let issues = octocrab.issues(&ctx.config.github_repo_owner, &ctx.config.github_repo_name);
@@ -258,7 +255,7 @@ async fn bench_pr_and_cache_results(
     ctx: &JobContext<'_>,
     branches: PrBranches,
     logs: &mut BenchPrLogs,
-) -> anyhow::Result<CompareResult> {
+) -> anyhow::Result<ComparisonResult> {
     let cutoff_date = OffsetDateTime::now_utc() - Duration::days(30);
     let historical_results = ctx
         .db
@@ -295,9 +292,9 @@ async fn bench_pr_and_cache_results(
     // Write the task logs so they are available even if commenting to GitHub fails
     let mut s = String::new();
     writeln!(s, "### Candidate").ok();
-    BenchPrResult::write_logs_for_run(&mut s, &logs.candidate);
+    write_logs_for_run(&mut s, &logs.candidate);
     writeln!(s, "### Base").ok();
-    BenchPrResult::write_logs_for_run(&mut s, &logs.base);
+    write_logs_for_run(&mut s, &logs.base);
     fs::write(ctx.job_output_dir.join("logs.md"), s).context("unable to write job logs")?;
 
     if let Ok(result) = &result {
@@ -317,12 +314,12 @@ async fn bench_pr_and_cache_results(
 
 fn pr_branches(pr: &PullRequest) -> Option<PrBranches> {
     Some(PrBranches {
-        candidate: RepoAndSha {
+        candidate: CommitIdentifier {
             branch_name: pr.head.ref_field.clone(),
             commit_sha: pr.head.sha.clone(),
             clone_url: pr.head.repo.as_ref()?.clone_url.as_ref()?.to_string(),
         },
-        baseline: RepoAndSha {
+        baseline: CommitIdentifier {
             branch_name: pr.base.ref_field.clone(),
             commit_sha: pr.base.sha.clone(),
             clone_url: pr.base.repo.as_ref()?.clone_url.as_ref()?.to_string(),
@@ -336,7 +333,7 @@ fn compare_refs(
     logs: &mut BenchPrLogs,
     runner: &dyn BenchRunner,
     significance_thresholds: &HashMap<String, f64>,
-) -> anyhow::Result<CompareResult> {
+) -> anyhow::Result<ComparisonResult> {
     let candidate_repo = TempDir::new().context("Unable to create temp dir")?;
     let candidate_repo_path = candidate_repo.path().to_owned();
 
@@ -368,7 +365,7 @@ fn compare_refs(
         significance_thresholds,
     )?;
 
-    Ok(CompareResult {
+    Ok(ComparisonResult {
         diffs,
         scenarios_missing_in_baseline: missing,
     })
@@ -378,7 +375,7 @@ fn calculate_significance_thresholds(historical_results: Vec<BenchResult>) -> Ha
     let mut results_by_name = HashMap::new();
     for result in historical_results {
         results_by_name
-            .entry(result.name)
+            .entry(result.scenario_name)
             .or_insert(Vec::new())
             .push(result.result as u64);
     }
@@ -413,13 +410,8 @@ fn calculate_significance_thresholds(historical_results: Vec<BenchResult>) -> Ha
 
 #[derive(Clone)]
 pub struct PrBranches {
-    pub baseline: RepoAndSha,
-    pub candidate: RepoAndSha,
-}
-
-struct BenchPrResult {
-    branches: PrBranches,
-    result: Result<CompareResult, BenchPrError>,
+    pub baseline: CommitIdentifier,
+    pub candidate: CommitIdentifier,
 }
 
 struct BenchPrError {
@@ -433,78 +425,51 @@ struct BenchPrLogs {
     candidate: Vec<Log>,
 }
 
-impl BenchPrResult {
-    fn into_markdown_comment(self, diff_url: &str) -> String {
-        let checkout_details = self.checkout_details();
-
-        let mut s = String::new();
-        match self.result {
-            Ok(bench_results) => {
-                s = print_report(bench_results, diff_url);
-                writeln!(s, "### Checkout details").ok();
-                write!(s, "{checkout_details}").ok();
-            }
-            Err(error) => {
-                writeln!(s, "# Error running benchmarks").ok();
-                writeln!(s, "Cause:").ok();
-                writeln!(s, "```\n{:?}\n```", error.error).ok();
-                writeln!(s, "Checkout details:").ok();
-                write!(s, "{checkout_details}").ok();
-                writeln!(s, "## Logs").ok();
-                writeln!(s, "### Candidate").ok();
-                Self::write_logs_for_run(&mut s, &error.logs.candidate);
-                writeln!(s, "### Base").ok();
-                Self::write_logs_for_run(&mut s, &error.logs.base);
-            }
-        }
-
-        s
-    }
-
-    fn write_logs_for_run(s: &mut String, logs: &[Log]) {
-        if logs.is_empty() {
-            writeln!(s, "_Not available_").ok();
-        }
-
-        for log in logs {
-            Self::write_log(s, log);
-        }
-    }
-
-    fn write_log(s: &mut String, log: &Log) {
-        Self::write_log_part(s, "command", &log.command);
-        Self::write_log_part(s, "cwd", &log.cwd);
-        Self::write_log_part(s, "stdout", &String::from_utf8_lossy(&log.stdout));
-        Self::write_log_part(s, "stderr", &String::from_utf8_lossy(&log.stderr));
-    }
-
-    fn write_log_part(s: &mut String, part_name: &str, part: &str) {
-        write!(s, "{part_name}:").ok();
-        if part.trim().is_empty() {
-            writeln!(s, " _empty_.\n").ok();
-        } else {
-            writeln!(s, "\n```\n{}\n```\n", part.trim_end()).ok();
-        }
-    }
-
-    fn checkout_details(&self) -> String {
-        let mut s = String::new();
-        writeln!(s, "- Base repo: {}", self.branches.baseline.clone_url).ok();
+/// Creates a markdown version of the results for posting to GitHub as a comment
+fn markdown_comment(
+    branches: &PrBranches,
+    result: Result<ComparisonResult, BenchPrError>,
+    diff_url: &str,
+) -> String {
+    fn write_checkout_details(s: &mut String, branches: &PrBranches) {
+        writeln!(s, "- Base repo: {}", branches.baseline.clone_url).ok();
         writeln!(
             s,
             "- Base branch: {} ({})",
-            self.branches.baseline.branch_name, self.branches.baseline.commit_sha,
+            branches.baseline.branch_name, branches.baseline.commit_sha,
         )
         .ok();
-        writeln!(s, "- Candidate repo: {}", self.branches.candidate.clone_url).ok();
+        writeln!(s, "- Candidate repo: {}", branches.candidate.clone_url).ok();
         writeln!(
             s,
             "- Candidate branch: {} ({})",
-            self.branches.candidate.branch_name, self.branches.candidate.commit_sha,
+            branches.candidate.branch_name, branches.candidate.commit_sha,
         )
         .ok();
-        s
     }
+
+    let mut s = String::new();
+    match result {
+        Ok(bench_results) => {
+            s = print_report(bench_results, diff_url);
+            writeln!(s, "### Checkout details").ok();
+            write_checkout_details(&mut s, branches);
+        }
+        Err(error) => {
+            writeln!(s, "# Error running benchmarks").ok();
+            writeln!(s, "Cause:").ok();
+            writeln!(s, "```\n{:?}\n```", error.error).ok();
+            writeln!(s, "Checkout details:").ok();
+            write_checkout_details(&mut s, branches);
+            writeln!(s, "## Logs").ok();
+            writeln!(s, "### Candidate").ok();
+            write_logs_for_run(&mut s, &error.logs.candidate);
+            writeln!(s, "### Base").ok();
+            write_logs_for_run(&mut s, &error.logs.base);
+        }
+    }
+
+    s
 }
 
 /// Returns an internal representation of the comparison between the baseline and the candidate
@@ -544,7 +509,7 @@ fn compare_results(
 }
 
 /// Prints a report of the comparison to stdout, using GitHub-flavored markdown
-fn print_report(result: CompareResult, cachegrind_diff_url: &str) -> String {
+fn print_report(result: ComparisonResult, cachegrind_diff_url: &str) -> String {
     let (significant, negligible) = split_on_threshold(result.diffs);
 
     let mut s = String::new();
@@ -713,7 +678,7 @@ mod test {
         let bench_results = historical_results
             .into_iter()
             .map(|result| BenchResult {
-                name: "foo".to_string(),
+                scenario_name: "foo".to_string(),
                 result,
             })
             .collect();
@@ -728,7 +693,7 @@ mod test {
         let bench_results = std::iter::repeat(1000.0)
             .take(10)
             .map(|result| BenchResult {
-                name: "foo".to_string(),
+                scenario_name: "foo".to_string(),
                 result,
             })
             .collect();

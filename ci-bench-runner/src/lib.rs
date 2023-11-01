@@ -23,7 +23,7 @@ use sqlx::migrate::Migrator;
 use sqlx::SqliteConnection;
 use tokio::sync::Mutex;
 use tower_http::trace::TraceLayer;
-use tracing::{debug, error, info};
+use tracing::{error, info, trace};
 use uuid::Uuid;
 
 pub use crate::db::Db;
@@ -33,50 +33,59 @@ pub use crate::github::CachedOctocrab;
 use crate::runner::BenchRunner;
 pub use crate::runner::LocalBenchRunner;
 
+/// The application's state, accessible when handling requests
 struct AppState {
     config: Arc<AppConfig>,
     event_queue: EventQueue,
     db: Db,
 }
 
+/// The application's configuration
 #[derive(Deserialize)]
 pub struct AppConfig {
+    /// Base URL of the application (used to generate links)
     pub app_base_url: String,
+    /// Local directory where job output will be stored
     pub job_output_dir: PathBuf,
+    /// Path to the SQLite database used for persistence
     pub path_to_db: String,
+    /// Secret used by GitHub to sign webhook payloads
     pub webhook_secret: String,
+    /// ID of the GitHub App we are authenticated as
     pub github_app_id: u64,
+    /// Private key of the GitHub App we are authenticated as
     pub github_app_key: String,
+    /// GitHub repository owner (typically rustls)
     pub github_repo_owner: String,
+    /// GitHub repository name (typically rustls)
     pub github_repo_name: String,
+    /// Sentry DSN
     pub sentry_dsn: String,
+    /// Port where the application should listen (defaults to 0 if unset)
     pub port: Option<u16>,
 }
 
-fn app_state(
-    config: Arc<AppConfig>,
-    octocrab: CachedOctocrab,
-    bench_runner: Arc<dyn BenchRunner>,
-    sqlite: Arc<Mutex<SqliteConnection>>,
-) -> Arc<AppState> {
-    let db = Db::with_connection(sqlite);
-    let event_queue = EventQueue::new(config.clone(), db.clone(), bench_runner, octocrab);
-    let state = AppState {
-        config,
-        event_queue,
-        db,
-    };
-    Arc::new(state)
-}
-
+/// Creates a new instance of the HTTP server and returns the address at which it is listening
 pub fn server(
     config: Arc<AppConfig>,
     octocrab: CachedOctocrab,
     bench_runner: Arc<dyn BenchRunner>,
     sqlite: Arc<Mutex<SqliteConnection>>,
-) -> (impl Future<Output = ()>, SocketAddr) {
+) -> (impl Future<Output = Result<(), hyper::Error>>, SocketAddr) {
     let port = config.port.unwrap_or(0);
-    let state = app_state(config, octocrab, bench_runner, sqlite);
+
+    // Set up dependencies
+    let db = Db::with_connection(sqlite);
+    let event_queue = EventQueue::new(config.clone(), db.clone(), bench_runner, octocrab);
+
+    // The application's state, accessible when handling requests
+    let state = Arc::new(AppState {
+        config,
+        event_queue,
+        db,
+    });
+
+    // Set up the axum application
     let app = Router::new()
         .route("/webhooks/github", post(handle_github_webhook))
         .route("/jobs/:id", get(get_job_status))
@@ -90,14 +99,12 @@ pub fn server(
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let server = axum::Server::bind(&addr).serve(app.into_make_service());
     let addr = server.local_addr();
-    debug!("listening on port {}", addr.port());
-    let future = async move {
-        server.await.unwrap();
-    };
-    (future, addr)
+
+    info!("listening on port {}", addr.port());
+    (server, addr)
 }
 
-/// Returns the status of the job
+/// Returns status information about the job
 async fn get_job_status(
     State(state): State<Arc<AppState>>,
     Path(id): Path<Uuid>,
@@ -116,11 +123,12 @@ async fn get_job_status(
     Ok(response)
 }
 
-/// Returns the cachegrind diff of the job
+/// Returns the cachegrind diff between the specified commits, for the provided scenario
 async fn get_cachegrind_diff(
     State(state): State<Arc<AppState>>,
     Path((compared_commits, scenario_name)): Path<(String, String)>,
 ) -> axum::response::Result<String> {
+    // Extract commit hashes from URL
     let mut commit_parts = compared_commits.split(':');
     let baseline_commit = commit_parts.next().ok_or("malformed URL")?;
     let candidate_commit = commit_parts.next().ok_or("malformed URL")?;
@@ -133,6 +141,7 @@ async fn get_cachegrind_diff(
         .cachegrind_diff(baseline_commit, candidate_commit, &scenario_name)
         .await
         .map_err(|_| "internal server error")?;
+
     let result = result.ok_or((
         StatusCode::NOT_FOUND,
         "comparison not found for the provided commit hashes and scenario",
@@ -147,35 +156,37 @@ async fn handle_github_webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    debug!("incoming webhook");
+    trace!("incoming webhook");
 
     let Some(signature) = headers.get(WEBHOOK_SIGNATURE_HEADER) else {
-        debug!("{WEBHOOK_SIGNATURE_HEADER} is missing, ignoring event");
+        trace!("{WEBHOOK_SIGNATURE_HEADER} header is missing, ignoring event");
         return StatusCode::BAD_REQUEST;
     };
 
     let Ok(signature) = signature.to_str() else {
-        debug!("{WEBHOOK_SIGNATURE_HEADER} has an invalid header value, ignoring event");
+        trace!("{WEBHOOK_SIGNATURE_HEADER} has an invalid header value, ignoring event");
         return StatusCode::BAD_REQUEST;
     };
 
     if !verify_webhook_signature(&body, signature, &state.config.webhook_secret) {
-        debug!("Invalid signature, ignoring event");
+        trace!("Invalid signature, ignoring event");
         return StatusCode::BAD_REQUEST;
     }
 
     let Some(event) = headers.get(WEBHOOK_EVENT_HEADER) else {
+        trace!("{WEBHOOK_EVENT_HEADER} header is missing, ignoring event");
         return StatusCode::BAD_REQUEST;
     };
 
     let Ok(event) = event.to_str() else {
-        debug!("{WEBHOOK_EVENT_HEADER} has an invalid header value, ignoring event");
+        trace!("{WEBHOOK_EVENT_HEADER} has an invalid header value, ignoring event");
         return StatusCode::BAD_REQUEST;
     };
 
+    // Events are enqueued and processed sequentially in the background
     match state.event_queue.enqueue(event, body).await {
         Ok(Some(event_id)) => {
-            info!("enqueued webhook event `{event}` with id `{event_id}`");
+            trace!("enqueued webhook event `{event}` with id `{event_id}`");
             StatusCode::OK
         }
         Ok(None) => {
@@ -198,11 +209,16 @@ pub static WEBHOOK_SIGNATURE_HEADER: &str = "X-Hub-Signature-256";
 /// The HTTP header containing the name of the event that triggered the GitHub webhook
 pub static WEBHOOK_EVENT_HEADER: &str = "X-GitHub-Event";
 
+/// Identifies a specific commit in a repository
 #[derive(Clone)]
-pub struct RepoAndSha {
+pub struct CommitIdentifier {
+    /// The URL at which the repository can be cloned
     pub clone_url: String,
+    /// The branch we are interested in (for reporting purposes)
     pub branch_name: String,
+    /// The specific commit we are interested in
     pub commit_sha: String,
 }
 
+/// Migrator for our SQLite database
 pub static MIGRATOR: Migrator = sqlx::migrate!();

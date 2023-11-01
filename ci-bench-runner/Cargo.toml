@@ -8,6 +8,7 @@ anyhow = "1.0.75"
 axum = "0.6.20"
 hex = "0.4.3"
 hmac = "0.12.1"
+hyper = { version = "0.14.27", default-features = false }
 jsonwebtoken = "9.1.0"
 # TODO: replace by a crates.io version once they publish it
 octocrab = { git = "https://github.com/XAMPPRocky/octocrab.git" }

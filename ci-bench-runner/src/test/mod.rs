@@ -23,7 +23,8 @@ use crate::db::{ScenarioDiff, ScenarioKind};
 use crate::github::CachedOctocrab;
 use crate::runner::{BenchRunner, Log};
 use crate::{
-    server, AppConfig, Db, RepoAndSha, MIGRATOR, WEBHOOK_EVENT_HEADER, WEBHOOK_SIGNATURE_HEADER,
+    server, AppConfig, CommitIdentifier, Db, MIGRATOR, WEBHOOK_EVENT_HEADER,
+    WEBHOOK_SIGNATURE_HEADER,
 };
 
 mod api {
@@ -93,7 +94,7 @@ struct MockBenchRunnerConfig {
 }
 
 struct MockBenchRun {
-    repo_and_ref: RepoAndSha,
+    commit: CommitIdentifier,
 }
 
 impl MockBenchRunner {
@@ -110,7 +111,7 @@ impl MockBenchRunner {
 impl BenchRunner for MockBenchRunner {
     fn checkout_and_run_benchmarks(
         &self,
-        repo_and_ref: &RepoAndSha,
+        commit: &CommitIdentifier,
         _: &Path,
         job_output_dir: &Path,
         _: &mut Vec<Log>,
@@ -139,7 +140,7 @@ impl BenchRunner for MockBenchRunner {
         // Notify any watchers of this call
         self.runs_tx
             .send(MockBenchRun {
-                repo_and_ref: repo_and_ref.clone(),
+                commit: commit.clone(),
             })
             .unwrap();
         Ok(())
@@ -467,8 +468,8 @@ async fn test_push_happy_path() {
     .await
     .unwrap()
     .unwrap();
-    assert_eq!(run.repo_and_ref.branch_name, "main");
-    assert_eq!(run.repo_and_ref.clone_url, expected_clone_url);
+    assert_eq!(run.commit.branch_name, "main");
+    assert_eq!(run.commit.clone_url, expected_clone_url);
 
     // Check the bench run for the second event
     let run = tokio::time::timeout(
@@ -478,8 +479,8 @@ async fn test_push_happy_path() {
     .await
     .unwrap()
     .unwrap();
-    assert_eq!(run.repo_and_ref.branch_name, "main");
-    assert_eq!(run.repo_and_ref.clone_url, expected_clone_url);
+    assert_eq!(run.commit.branch_name, "main");
+    assert_eq!(run.commit.clone_url, expected_clone_url);
 
     // No more runs
     assert!(server
