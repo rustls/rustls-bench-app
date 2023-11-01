@@ -1,4 +1,3 @@
-Cargo.lock
 target/
 *.gcda
 *.gcno
@@ -11,6 +10,7 @@ admin/rustfmt
 **/._.DS_Store
 /.idea
 /default.profraw
+/.direnv
 
 ci-bench-runner/config.json
 ansible/secrets.yml
