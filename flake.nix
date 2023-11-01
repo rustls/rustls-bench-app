@@ -15,8 +15,8 @@
           cargoToml =
             builtins.fromTOML (builtins.readFile "${crateDir}/Cargo.toml");
 
-          runtimeDeps = with pkgs; [ openssl ];
-          buildDeps = with pkgs; [ pkg-config ];
+          runtimeDeps = with pkgs; [ ];
+          buildDeps = with pkgs; [ ];
           devDeps = with pkgs; [ pkgs.ansible ];
 
           mkDevShell = rustc:
