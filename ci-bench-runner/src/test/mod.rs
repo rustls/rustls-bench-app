@@ -7,6 +7,7 @@ use anyhow::bail;
 use ctor::ctor;
 use hmac::digest::FixedOutput;
 use hmac::{Hmac, Mac};
+use octocrab::models::CommentId;
 use reqwest::StatusCode;
 use serde_json::json;
 use sha2::Sha256;
@@ -294,6 +295,48 @@ async fn test_pr_opened_happy_path_with_comment_reuse() {
     tokio::time::timeout(Duration::from_secs(1), post_status.wait_until_satisfied())
         .await
         .ok();
+
+    // Assert that the mocks were used and report any errors
+    mock_github.server.verify().await;
+}
+
+#[tokio::test]
+async fn test_pr_opened_happy_path_with_failed_comment_reuse() {
+    // Mock HTTP responses from GitHub
+    let mock_github = MockGitHub::start().await;
+    let _post_comment = mock_github.mock_post_comment().await;
+    let _update_comment = mock_github.mock_update_comment_fail().await;
+    let post_status = mock_github.mock_post_status().await;
+
+    // Run the job server
+    let server = TestServer::start(&mock_github).await;
+
+    // Populate the db with an "existing" comment for the PR, so the app tries to update it
+    server
+        .db
+        .store_result_comment_id(7, 42.into())
+        .await
+        .unwrap();
+
+    // Post the webhook event
+    let client = reqwest::Client::default();
+    post_webhook(
+        &client,
+        &server.base_url,
+        &server.config.webhook_secret,
+        webhook::pull_request_opened(),
+        "pull_request",
+    )
+    .await;
+
+    // Wait for our post status endpoint to have been called
+    tokio::time::timeout(Duration::from_secs(2), post_status.wait_until_satisfied())
+        .await
+        .ok();
+
+    // Ensure the comment id has been updated
+    let comment_id = server.db.result_comment_id(7).await.unwrap();
+    assert_eq!(comment_id, Some(CommentId::from(1)));
 
     // Assert that the mocks were used and report any errors
     mock_github.server.verify().await;
@@ -650,7 +693,8 @@ impl MockGitHub {
             .respond_with(
                 ResponseTemplate::new(200).set_body_string(installation(Self::APP_INSTALLATION)),
             )
-            .expect(1);
+            .expect(1)
+            .named("get_app_installation");
 
         self.server.register_as_scoped(get_app_installation).await
     }
@@ -673,7 +717,8 @@ impl MockGitHub {
                 Self::APP_INSTALLATION
             )))
             .respond_with(ResponseTemplate::new(200).set_body_string(response))
-            .expect(1);
+            .expect(1)
+            .named("get_access_token");
 
         self.server.register_as_scoped(get_access_token).await
     }
@@ -685,7 +730,8 @@ impl MockGitHub {
                 Self::repo_path()
             )))
             .respond_with(ResponseTemplate::new(200).set_body_string(pull_request()))
-            .expect(1);
+            .expect(1)
+            .named("get_pr");
 
         self.server.register_as_scoped(get_pull_request).await
     }
@@ -698,7 +744,8 @@ impl MockGitHub {
                 Self::repo_path()
             )))
             .respond_with(ResponseTemplate::new(201).set_body_string(response))
-            .expect(2);
+            .expect(2)
+            .named("post_status");
 
         self.server.register_as_scoped(post_status).await
     }
@@ -713,13 +760,14 @@ impl MockGitHub {
                 "Significant instruction count differences",
             ))
             .respond_with(ResponseTemplate::new(201).set_body_string(api::CREATE_COMMENT))
-            .expect(1);
+            .expect(1)
+            .named("post_comment");
 
         self.server.register_as_scoped(post_comment).await
     }
 
     async fn mock_update_comment(&self) -> MockGuard {
-        let post_comment = Mock::given(method("POST"))
+        let update_comment = Mock::given(method("POST"))
             .and(path_regex(format!(
                 r"/repos/{}/issues/comments/\d+",
                 Self::repo_path()
@@ -728,7 +776,21 @@ impl MockGitHub {
                 "Significant instruction count differences",
             ))
             .respond_with(ResponseTemplate::new(201).set_body_string(api::CREATE_COMMENT))
-            .expect(1);
+            .expect(1)
+            .named("update_comment");
+
+        self.server.register_as_scoped(update_comment).await
+    }
+
+    async fn mock_update_comment_fail(&self) -> MockGuard {
+        let post_comment = Mock::given(method("POST"))
+            .and(path_regex(format!(
+                r"/repos/{}/issues/comments/\d+",
+                Self::repo_path()
+            )))
+            .respond_with(ResponseTemplate::new(StatusCode::BAD_REQUEST))
+            .expect(1)
+            .named("update_comment_fail");
 
         self.server.register_as_scoped(post_comment).await
     }

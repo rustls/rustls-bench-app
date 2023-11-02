@@ -485,11 +485,16 @@ impl Db {
         comment_id: CommentId,
     ) -> anyhow::Result<()> {
         let mut conn = self.sqlite.lock().await;
-        sqlx::query("INSERT INTO result_comments (pr_number, comment_id) VALUES (?, ?)")
-            .bind(pr_number as i64)
-            .bind(comment_id.into_inner() as i64)
-            .execute(conn.deref_mut())
-            .await?;
+        sqlx::query(
+            r"
+            INSERT INTO result_comments (pr_number, comment_id)
+            VALUES (?, ?)
+            ON CONFLICT(pr_number) DO UPDATE SET comment_id = excluded.comment_id",
+        )
+        .bind(pr_number as i64)
+        .bind(comment_id.into_inner() as i64)
+        .execute(conn.deref_mut())
+        .await?;
 
         Ok(())
     }
@@ -711,12 +716,19 @@ mod test {
     async fn test_store_load_result_comment_id_round_trips() -> anyhow::Result<()> {
         let db = empty_db().await;
 
+        // Insert
         let original_comment_id = 100.into();
         db.store_result_comment_id(42, original_comment_id).await?;
         let comment_id = db.result_comment_id(42).await?;
-
         assert_eq!(comment_id, Some(original_comment_id));
 
+        // Update
+        let new_comment_id = 400.into();
+        db.store_result_comment_id(42, new_comment_id).await?;
+        let comment_id = db.result_comment_id(42).await?;
+        assert_eq!(comment_id, Some(new_comment_id));
+
+        // Not found
         let comment_id = db.result_comment_id(43).await?;
         assert_eq!(comment_id, None);
 

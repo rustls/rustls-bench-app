@@ -50,8 +50,6 @@ CREATE TABLE jobs(
 ) STRICT;
 
 CREATE TABLE result_comments(
-    pr_number INTEGER NOT NULL,
+    pr_number INTEGER PRIMARY KEY,
     comment_id INTEGER NOT NULL
 ) STRICT;
-
-CREATE INDEX idx_result_comments_by_number ON result_comments(pr_number);

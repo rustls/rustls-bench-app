@@ -7,11 +7,12 @@ use std::ops::Deref;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use octocrab::models::pulls::PullRequest;
 use octocrab::models::webhook_events::payload::PullRequestWebhookEventAction;
 use octocrab::models::webhook_events::{WebhookEvent, WebhookEventPayload};
 use octocrab::models::StatusState;
+use octocrab::Octocrab;
 use tempfile::TempDir;
 use time::{Duration, OffsetDateTime};
 use tracing::{debug, error, info, trace};
@@ -230,11 +231,13 @@ pub async fn bench_pr(
     let mut comment = markdown_comment(&branches, result, &cachegrind_diff_url);
     github::maybe_truncate_comment(&mut comment);
 
-    let issues = octocrab.issues(&ctx.config.github_repo_owner, &ctx.config.github_repo_name);
-    if let Some(comment_id) = ctx.db.result_comment_id(pr_number).await? {
-        issues.update_comment(comment_id, comment).await?;
-    } else {
-        let comment = issues.create_comment(pr_number, comment).await?;
+    let update_result = try_update_comment(pr_number, &comment, &octocrab, &ctx).await;
+    if update_result.is_err() {
+        // Fall back to creating a comment if updating fails
+        let comment = octocrab
+            .issues(&ctx.config.github_repo_owner, &ctx.config.github_repo_name)
+            .create_comment(pr_number, comment)
+            .await?;
         ctx.db
             .store_result_comment_id(pr_number, comment.id)
             .await?;
@@ -249,6 +252,24 @@ pub async fn bench_pr(
     .await;
 
     Ok(())
+}
+
+async fn try_update_comment(
+    pr_number: u64,
+    comment: &str,
+    octocrab: &Octocrab,
+    ctx: &JobContext<'_>,
+) -> anyhow::Result<()> {
+    if let Some(comment_id) = ctx.db.result_comment_id(pr_number).await? {
+        octocrab
+            .issues(&ctx.config.github_repo_owner, &ctx.config.github_repo_name)
+            .update_comment(comment_id, comment)
+            .await?;
+
+        Ok(())
+    } else {
+        bail!("no comment registered for PR")
+    }
 }
 
 async fn bench_pr_and_cache_results(
