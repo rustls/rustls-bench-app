@@ -161,9 +161,12 @@ pub async fn handle_pr_update(ctx: JobContext<'_>) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    if payload.action != PullRequestWebhookEventAction::Opened
-        && payload.action != PullRequestWebhookEventAction::Synchronize
-    {
+    let allowed_actions = [
+        PullRequestWebhookEventAction::Opened,
+        PullRequestWebhookEventAction::Synchronize,
+        PullRequestWebhookEventAction::Reopened,
+    ];
+    if !allowed_actions.contains(&payload.action) {
         trace!(
             "ignoring pull request event with action {:?}",
             payload.action
