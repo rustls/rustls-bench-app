@@ -171,6 +171,7 @@ impl CachedOctocrab {
 pub async fn update_commit_status(
     sha: String,
     state: StatusState,
+    job_url: String,
     config: &AppConfig,
     octocrab: &Octocrab,
 ) {
@@ -178,6 +179,7 @@ pub async fn update_commit_status(
         .repos(&config.github_repo_owner, &config.github_repo_name)
         .create_status(sha, state)
         .context("icount benchmarks".to_string())
+        .target(job_url)
         .send()
         .await;
 

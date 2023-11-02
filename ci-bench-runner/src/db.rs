@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context};
 use octocrab::models::CommentId;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use serde_json::json;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Connection, Error, FromRow, Row, SqliteConnection};
@@ -53,11 +53,28 @@ pub struct BenchJob {
     #[sqlx(try_from = "Vec<u8>")]
     pub id: Uuid,
     /// The moment at which the GitHub event that triggered this job was enqueued
+    #[serde(with = "time::serde::rfc3339")]
     pub event_queued_utc: OffsetDateTime,
     /// The moment at which this job was created
+    #[serde(with = "time::serde::rfc3339")]
     pub created_utc: OffsetDateTime,
     /// The moment at which this job finished
+    #[serde(serialize_with = "self::serialize_offset_date_time_option")]
     pub finished_utc: Option<OffsetDateTime>,
+}
+
+pub fn serialize_offset_date_time_option<S>(
+    value: &Option<OffsetDateTime>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    if let Some(value) = value {
+        time::serde::rfc3339::serialize(value, serializer)
+    } else {
+        serializer.serialize_none()
+    }
 }
 
 /// A result for a specific benchmark scenario

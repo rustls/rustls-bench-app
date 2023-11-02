@@ -201,10 +201,12 @@ pub async fn bench_pr(
         return Ok(());
     }
 
+    let job_url = format!("{}/jobs/{}", ctx.config.app_base_url, ctx.job_id);
     let octocrab = ctx.octocrab.cached();
     update_commit_status(
         branches.candidate.commit_sha.clone(),
         StatusState::Pending,
+        job_url.clone(),
         ctx.config,
         &octocrab,
     )
@@ -249,6 +251,7 @@ pub async fn bench_pr(
     update_commit_status(
         branches.candidate.commit_sha.clone(),
         StatusState::Success,
+        job_url,
         ctx.config,
         &octocrab,
     )
