@@ -150,10 +150,10 @@ impl BenchRunner for MockBenchRunner {
 #[ctor]
 fn setup() {
     // Uncomment to get logs for the tests and have more context when debugging
-    // use tracing_subscriber::Layer;
+    // use tracing::Level;
     // use tracing_subscriber::layer::SubscriberExt;
     // use tracing_subscriber::util::SubscriberInitExt;
-    // use tracing::Level;
+    // use tracing_subscriber::Layer;
     // let filter = tracing_subscriber::filter::Targets::default()
     //     .with_target("ci_bench_runner", Level::TRACE)
     //     .with_target("sqlx", Level::DEBUG)
