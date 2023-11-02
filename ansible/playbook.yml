@@ -43,8 +43,8 @@
       name: 'build'
     tags:
       - 'deploy'
-  - name: 'deploy benchmarking application'
+  - name: 'setup benchmarking application service'
     import_role:
-      name: 'deploy'
+      name: 'bench-app-service'
     tags:
       - 'deploy'
