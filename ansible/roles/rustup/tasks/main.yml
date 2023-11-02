@@ -5,8 +5,6 @@
     mode: 'u=rwx,g=r,o=r'
     owner: '{{app_user}}'
     group: '{{app_user}}'
-  args:
-    creates: '/home/{{app_user}}/.rustup'
 - name: 'install rustup'
   # Note: we have vendored the rustup install script
   command: '/home/{{app_user}}/rustup-install.sh -y -q'

@@ -3,8 +3,11 @@
   become: true
   vars:
     hostname: 'rustls-perf.ochagavia.nl'
-    letsencrypt_email: 'le@adolfo.ochagavia.nl'
     app_user: 'ci-bench-runner'
+    bench_app_repo: 'https://github.com/aochagavia/rustls-bench-app/'
+    bench_app_branch: 'main'
+    github_repo_owner: 'rustls'
+    github_repo_name: 'rustls'
   vars_files:
     - 'secrets.yml'
   tasks:
@@ -29,14 +32,19 @@
       state: 'present'
     tags:
       - 'rustup'
-      - 'deploy'
+      - 'build-and-deploy'
   - name: 'install rustup / update rust toolchain'
     import_role:
       name: 'rustup'
     tags:
       - 'rustup'
-  - name: 'deploy benchmarking application'
+  - name: 'build benchmarking application'
     import_role:
-      name: 'deploy'
+      name: 'build'
     tags:
-      - 'deploy'
+      - 'build-and-deploy'
+  - name: 'setup benchmarking application service'
+    import_role:
+      name: 'bench-app-service'
+    tags:
+      - 'build-and-deploy'

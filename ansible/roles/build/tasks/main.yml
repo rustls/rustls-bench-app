@@ -1,0 +1,36 @@
+- name: 'Install git'
+  apt:
+    name: git
+  tags:
+    - 'setup'
+- name: 'Git checkout'
+  become_user: '{{app_user}}'
+  git:
+    repo: '{{ bench_app_repo }}'
+    dest: /home/{{app_user}}/rustls-bench-app
+    depth: 1
+    version: '{{ bench_app_branch }}'
+    force: true # Cargo builds will dirty the clone.
+  tags:
+    - 'setup'
+- name: 'Build app'
+  become_user: '{{app_user}}'
+  command: '/home/{{app_user}}/.cargo/bin/cargo build --release'
+  args:
+    chdir: '/home/{{app_user}}/rustls-bench-app/ci-bench-runner'
+    # Note: omitting a 'creates' here - we want to build fresh even if the binary exists
+    #       in order to pick up changes from the src git repo updating.
+  tags:
+    - 'setup'
+- name: 'Copy release build'
+  copy:
+      src: '/home/{{app_user}}/rustls-bench-app/ci-bench-runner/target/release/ci-bench-runner'
+      remote_src: true
+      dest: '/home/{{app_user}}/server/ci-bench-runner'
+      owner: '{{app_user}}'
+      group: '{{app_user}}'
+      mode: 'u=rwx,g=rx,o=rx'
+  tags:
+    - 'setup'
+  notify:
+    - 'start app'
