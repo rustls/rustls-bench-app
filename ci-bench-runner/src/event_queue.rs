@@ -104,13 +104,8 @@ impl EventQueue {
 
     /// Spawns a tokio task to process queued events in the background.
     ///
-    /// The task works based on the "let it crash" principle for errors that are caused by
-    /// transient events, like the database being unavailable. Therefore, it should be supervised
+    /// The task works based on the "let it crash" principle. Therefore, it should be supervised
     /// and restarted upon need.
-    ///
-    /// An important consequence of letting the task crash and restart is that we will automatically
-    /// try handling the event again. Therefore we need to make sure we only crash on transient
-    /// errors (otherwise the we will get caught in an infinite crash and restart loop).
     fn process_queued_events_in_background(
         &self,
         event_enqueued_rx: Arc<tokio::sync::Mutex<UnboundedReceiver<()>>>,
@@ -149,15 +144,10 @@ impl EventQueue {
                     continue;
                 };
 
-                if let Some(job_id) = event.job_id {
-                    // It looks like we crashed while handling this event. If the job _did_ finish,
-                    // however, we can assume the event was processed but we failed to remove it
-                    // from the queue (otherwise we will try to handle it again)
-                    let job = db.job(job_id).await?;
-                    if job.finished_utc.is_some() {
-                        db.delete_event(event.id).await?;
-                        continue;
-                    }
+                if event.job_id.is_some() {
+                    // It looks like we crashed while handling this event. Let's remove it from the
+                    // queue to avoid a potential infinite crash loop.
+                    db.delete_event(event.id).await?;
                 }
 
                 let job_id = db.new_job_for_event(event.id, event.created_utc).await?;
