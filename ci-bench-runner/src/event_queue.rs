@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{error, info, trace_span, Instrument};
 use uuid::Uuid;
 
 use crate::db::{BenchJob, Db};
@@ -156,34 +156,45 @@ impl EventQueue {
                 let job_id = db.new_job_for_event(event.id, event.created_utc).await?;
                 *active_job_id.lock().unwrap() = Some(job_id);
 
-                let job_output_dir = config.job_output_dir.join(job_id.to_string());
-                let ctx = JobContext {
-                    event: &event.event,
-                    job_id,
-                    job_output_dir,
-                    octocrab: &octocrab,
-                    event_payload: &event.payload,
-                    config: &config,
-                    bench_runner: bench_runner.clone(),
-                    db: db.clone(),
-                };
+                let span = trace_span!(
+                    "handle event",
+                    job_id = job_id.to_string(),
+                    event = event.event
+                );
+                async {
+                    let job_output_dir = config.job_output_dir.join(job_id.to_string());
+                    let ctx = JobContext {
+                        event: &event.event,
+                        job_id,
+                        job_output_dir,
+                        octocrab: &octocrab,
+                        event_payload: &event.payload,
+                        config: &config,
+                        bench_runner: bench_runner.clone(),
+                        db: db.clone(),
+                    };
 
-                let result = match github_event {
-                    AllowedEvent::IssueComment => handle_issue_comment(ctx).await,
-                    AllowedEvent::PullRequest => handle_pr_update(ctx).await,
-                    AllowedEvent::PullRequestReview => handle_pr_review(ctx).await,
-                    AllowedEvent::Push => bench_main(ctx).await,
-                };
+                    let result = match github_event {
+                        AllowedEvent::IssueComment => handle_issue_comment(ctx).await,
+                        AllowedEvent::PullRequest => handle_pr_update(ctx).await,
+                        AllowedEvent::PullRequestReview => handle_pr_review(ctx).await,
+                        AllowedEvent::Push => bench_main(ctx).await,
+                    };
 
-                if let Err(e) = &result {
-                    error!(
-                        cause = e.to_string(),
-                        "error handling event: {github_event:?}"
-                    );
+                    if let Err(e) = &result {
+                        error!(
+                            cause = e.to_string(),
+                            "error handling event: {github_event:?}"
+                        );
+                    }
+
+                    db.job_finished(job_id, result.is_ok()).await?;
+                    db.delete_event(event.id).await?;
+
+                    Ok::<_, anyhow::Error>(())
                 }
-
-                db.job_finished(job_id, result.is_ok()).await?;
-                db.delete_event(event.id).await?;
+                .instrument(span)
+                .await?
             }
 
             Ok(())
