@@ -64,6 +64,7 @@ impl EventQueue {
         bench_runner: Arc<dyn BenchRunner>,
         octocrab: CachedOctocrab,
     ) {
+        let active_job_id = self.active_job_id.clone();
         let queue = self.clone();
         let event_enqueued_rx = Arc::new(tokio::sync::Mutex::new(event_enqueued_rx));
         tokio::spawn(async move {
@@ -97,6 +98,7 @@ impl EventQueue {
                     }
                 }
 
+                *active_job_id.lock().unwrap() = None;
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         });
@@ -104,8 +106,8 @@ impl EventQueue {
 
     /// Spawns a tokio task to process queued events in the background.
     ///
-    /// The task works based on the "let it crash" principle. Therefore, it should be supervised
-    /// and restarted upon need.
+    /// The task might unexpectedly crash. Therefore, it should be supervised and restarted upon
+    /// need.
     fn process_queued_events_in_background(
         &self,
         event_enqueued_rx: Arc<tokio::sync::Mutex<UnboundedReceiver<()>>>,
@@ -113,7 +115,7 @@ impl EventQueue {
         bench_runner: Arc<dyn BenchRunner>,
         octocrab: CachedOctocrab,
     ) -> JoinHandle<anyhow::Result<()>> {
-        let last_active_job_id = self.active_job_id.clone();
+        let active_job_id = self.active_job_id.clone();
         let db = self.db.clone();
         let event_enqueued_tx = self.event_enqueued_tx.clone();
 
@@ -146,12 +148,12 @@ impl EventQueue {
 
                 if event.job_id.is_some() {
                     // It looks like we crashed while handling this event. Let's remove it from the
-                    // queue to avoid a potential infinite crash loop.
+                    // queue to avoid an infinite crash loop.
                     db.delete_event(event.id).await?;
                 }
 
                 let job_id = db.new_job_for_event(event.id, event.created_utc).await?;
-                *last_active_job_id.lock().unwrap() = Some(job_id);
+                *active_job_id.lock().unwrap() = Some(job_id);
 
                 let job_output_dir = config.job_output_dir.join(job_id.to_string());
                 let ctx = JobContext {
