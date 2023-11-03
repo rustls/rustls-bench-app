@@ -15,7 +15,7 @@ use octocrab::models::StatusState;
 use octocrab::Octocrab;
 use tempfile::TempDir;
 use time::{Duration, OffsetDateTime};
-use tracing::{debug, error, info, trace};
+use tracing::{error, trace};
 
 use crate::db::{BenchResult, ComparisonResult, ScenarioDiff, ScenarioKind};
 use crate::event_queue::JobContext;
@@ -45,12 +45,16 @@ pub async fn handle_issue_comment(ctx: JobContext<'_>) -> anyhow::Result<()> {
     // Ideally, we'd use WebhookEvent::try_from_header_and_body from `octocrab`, but it doesn't have
     // the `author_association` field on the comment, which we need.
     let Ok(payload) = serde_json::from_slice::<CommentEvent>(ctx.event_payload) else {
-        error!("Invalid JSON payload, ignoring event");
+        error!(
+            event = ctx.event,
+            body = String::from_utf8_lossy(ctx.event_payload).to_string(),
+            "invalid JSON payload, ignoring event"
+        );
         return Ok(());
     };
 
     if payload.issue.pull_request.is_none() {
-        trace!("The comment was to a plain issue (not to a PR), ignoring event");
+        trace!("the comment was to a plain issue (not to a PR), ignoring event");
         return Ok(());
     };
 
@@ -82,7 +86,7 @@ pub async fn handle_issue_comment(ctx: JobContext<'_>) -> anyhow::Result<()> {
         let branches = pr_branches(&pr).ok_or(anyhow!("unable to get PR branch details"))?;
         bench_pr(ctx, pr.number, branches).await
     } else if body.contains("@rustls-bench") {
-        debug!("The comment was addressed at rustls-bench, but it is an unknown command!");
+        trace!("the comment was addressed at rustls-bench, but it is an unknown command!");
         let comment = "Unrecognized command. Available commands are:\n\
         * `@rustls-bench bench`: runs the instruction count benchmarks and reports the results";
         octocrab
@@ -91,7 +95,7 @@ pub async fn handle_issue_comment(ctx: JobContext<'_>) -> anyhow::Result<()> {
             .await?;
         Ok(())
     } else {
-        trace!("The comment was not addressed at rustls-bench");
+        trace!("the comment was not addressed at rustls-bench");
         Ok(())
     }
 }
@@ -130,10 +134,7 @@ pub async fn handle_pr_review(ctx: JobContext<'_>) -> anyhow::Result<()> {
     }
 
     let pr = payload.pull_request;
-    let Some(mut branches) = pr_branches(&pr) else {
-        error!("unable to obtain branches from payload, ignoring event");
-        return Ok(());
-    };
+    let mut branches = pr_branches(&pr).ok_or(anyhow!("unable to get PR branch details"))?;
 
     // Ensure we bench the commit that was reviewed, and not something else
     branches.candidate.commit_sha = payload.review.commit_id;
@@ -174,11 +175,8 @@ pub async fn handle_pr_update(ctx: JobContext<'_>) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let Some(branches) = pr_branches(&payload.pull_request) else {
-        error!("unable to obtain branches from payload, ignoring event");
-        return Ok(());
-    };
-
+    let branches =
+        pr_branches(&payload.pull_request).ok_or(anyhow!("unable to get PR branch details"))?;
     if branches.baseline.clone_url != branches.candidate.clone_url {
         trace!(
             "ignoring pull request update for forked repo (base repo = {}, head repo = {})",
@@ -196,11 +194,6 @@ pub async fn bench_pr(
     pr_number: u64,
     branches: PrBranches,
 ) -> anyhow::Result<()> {
-    if branches.baseline.branch_name != "main" {
-        trace!("ignoring bench request for PR with non-main base");
-        return Ok(());
-    }
-
     let job_url = format!("{}/jobs/{}", ctx.config.app_base_url, ctx.job_id);
     let octocrab = ctx.octocrab.cached();
     update_commit_status(
@@ -327,8 +320,8 @@ async fn bench_pr_and_cache_results(
     if let Ok(result) = &result {
         ctx.db
             .store_comparison_result(
-                branches.baseline.commit_sha.clone(),
-                branches.candidate.commit_sha.clone(),
+                branches.baseline.commit_sha,
+                branches.candidate.commit_sha,
                 result.scenarios_missing_in_baseline.clone(),
                 result.diffs.clone(),
             )
@@ -381,7 +374,6 @@ fn compare_refs(
         &mut logs.base,
     )?;
 
-    info!("comparing results");
     let baseline = read_results(&job_output_path.join("base/results/icounts.csv"))?;
     let candidate = read_results(&job_output_path.join("candidate/results/icounts.csv"))?;
     let (diffs, missing) = compare_results(

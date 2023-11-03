@@ -19,16 +19,16 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
     // Ideally, we'd use WebhookEvent::try_from_header_and_body from `octocrab`, but it doesn't have
     // the `repository` field on the payload, which we need.
     let Ok(payload) = serde_json::from_slice::<PushEvent>(ctx.event_payload) else {
-        bail!("Invalid JSON payload, ignoring event");
+        bail!("invalid JSON payload, ignoring event");
     };
 
     if payload.deleted {
-        trace!("Ignoring push event for deleted ref");
+        trace!("ignoring push event for deleted ref");
         return Ok(());
     }
 
     if payload.git_ref != "refs/heads/main" {
-        trace!("Ignoring push event for non-main ref: {}", payload.git_ref);
+        trace!("ignoring push event for non-main ref: {}", payload.git_ref);
         return Ok(());
     }
 
@@ -36,7 +36,7 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
     let job_output_dir = ctx.job_output_dir.clone();
     let bench_runner = ctx.bench_runner.clone();
     let icounts_path = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-        let base_repo = TempDir::new().context("Unable to create temp dir")?;
+        let base_repo = TempDir::new().context("unable to create temp dir")?;
         let base_repo_path = base_repo.path().to_owned();
         let mut logs = Vec::new();
 
@@ -57,7 +57,7 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
 
         result.with_context(|| {
             format!(
-                "Unable to run benchmarks for main branch. Check the logs at {} for more details.",
+                "unable to run benchmarks for main branch. Check the logs at {} for more details.",
                 job_output_dir.display()
             )
         })?;

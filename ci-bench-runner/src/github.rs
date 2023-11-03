@@ -8,7 +8,7 @@ use octocrab::models::{InstallationId, StatusState};
 use octocrab::Octocrab;
 use sha2::digest::FixedOutput;
 use sha2::Sha256;
-use tracing::{debug, error, trace, warn};
+use tracing::{error, trace, warn};
 
 use crate::AppConfig;
 
@@ -202,8 +202,6 @@ pub fn maybe_truncate_comment(body: &mut String) {
 
 /// Returns true if the webhook signature is valid
 pub fn verify_webhook_signature(body: &[u8], signature: &str, secret: &str) -> bool {
-    debug!("verifying webhook signature: {signature}");
-
     // Signatures always start with sha256=
     let signature = &signature[7..];
     let Ok(signature_bytes) = hex::decode(signature) else {
@@ -215,7 +213,10 @@ pub fn verify_webhook_signature(body: &[u8], signature: &str, secret: &str) -> b
 
     mac.update(body);
     let output = mac.finalize_fixed();
-    debug!("computed signature: {:?}", hex::encode(output.as_slice()));
+    trace!(
+        "verifying webhook signature; provided = {signature}; computed = {:?}",
+        hex::encode(output.as_slice())
+    );
 
     signature_bytes == output.as_slice()
 }
