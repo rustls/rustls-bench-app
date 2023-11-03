@@ -3,10 +3,11 @@
   "job_output_dir": "/home/{{app_user}}/server/job-output",
   "path_to_db": ":memory:",
   "webhook_secret": "{{ webhook_secret }}",
-  "github_app_id": {{ github_app_id }},
+  "github_app_id": "{{ github_app_id }}",
   "github_app_key": "{{ github_app_key.replace('\n', '\\n') }}",
   "github_repo_owner": "{{ github_repo_owner }}",
   "github_repo_name": "{{ github_repo_name }}",
   "sentry_dsn": "{{ sentry_dsn }}",
+  "bencher_api_token": "{{ bencher_api_token }}",
   "port": 3000
 }

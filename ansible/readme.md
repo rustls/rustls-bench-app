@@ -4,7 +4,7 @@ This directory contains the necessary scripts for the bench server's setup and m
 allow deploying the bench server application, installing its dependencies, and exposing it to the
 internet through HTTPS (including certificate renewal).
 
-Important notes: 
+Important notes:
 
 * Securing the server after setting up the operating system and creating users for server admins is not included.
 * Performing a deploy _will_ affect benchmarking results (for example due to compiling Rust code for `ci-bench-runner`).
@@ -31,9 +31,9 @@ will need to:
 1. Replace the placeholder secret values by real ones.
 
 Secrets will be injected in the Rust app configuration file, which can be found at
-[`roles/bench-app-service/templates/config.json`](roles/bench-app-service/templates/config.json). 
-If you are deploying the  app for testing purposes, you will probably need to override some variables like 
-`github_app_id`, `github_repo_owner` and `github_repo_name` to match yours. See the [testing](#testing) 
+[`roles/bench-app-service/templates/config.json`](roles/bench-app-service/templates/config.json).
+If you are deploying the  app for testing purposes, you will probably need to override some variables like
+`github_app_id`, `github_repo_owner` and `github_repo_name` to match yours. See the [testing](#testing)
 section for more information.
 
 ## General overview
@@ -67,12 +67,12 @@ Before starting, you will need:
 * A GitHub application configured according to the [GitHub app](../readme.md#github-app) section of
   the main README. The application **must** be installed on your fork of the rustls repo, with the required
   permissions.
-* If testing code changes to the `ci-bench-runner` app or Ansbile playbooks, a fork of this repository that 
+* If testing code changes to the `ci-bench-runner` app or Ansible playbooks, a fork of this repository that
   you control.
 
 ### Deployment
 
-To deploy to your test server, copy `inventory.ini` to a new file `test-inventory.ini`, and update 
+To deploy to your test server, copy `inventory.ini` to a new file `test-inventory.ini`, and update
 the `ansible_host` IP address in `test-inventory.ini` to point to your clean-slate server.
 
 You can then deploy using:
@@ -85,6 +85,7 @@ ansible-playbook \
   --extra_vars 'github_repo_name=rustls' \
   --extra-vars 'bench_app_repo=https://github.com/example/rustls-bench-app/' \
   --extra-vars 'bench_app_branch=example-branch' \
+  --extra-vars 'bencher_api_token=jwt_header.jwt_payload.jwt_verify_signature' \
   playbook.yml
 ```
 
@@ -92,3 +93,4 @@ ansible-playbook \
 * The `github_repo_owner` and `github_repo_name` should be configured to match your fork of the main Rustls repo.
 * The `bench_app_repo` and `bench_app_branch` should be configured to match your fork of this repository, and the
   branch you've pushed with your code changes (if applicable).
+* The `bencher_api_token` should be configured to a Bencher API token for [the `rustls` project](https://bencher.dev/perf/rustls)
