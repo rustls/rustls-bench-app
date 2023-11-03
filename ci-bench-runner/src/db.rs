@@ -61,6 +61,8 @@ pub struct BenchJob {
     /// The moment at which this job finished
     #[serde(serialize_with = "self::serialize_offset_date_time_option")]
     pub finished_utc: Option<OffsetDateTime>,
+    /// Whether the job finished without errors
+    pub success: Option<bool>,
 }
 
 pub fn serialize_offset_date_time_option<S>(
@@ -262,12 +264,13 @@ impl Db {
 
     /// Marks the job as finished
     #[tracing::instrument(skip(self))]
-    pub async fn job_finished(&self, id: Uuid) -> anyhow::Result<()> {
+    pub async fn job_finished(&self, id: Uuid, success: bool) -> anyhow::Result<()> {
         let finished_utc = OffsetDateTime::now_utc();
 
         let mut conn = self.sqlite.lock().await;
-        sqlx::query("UPDATE jobs SET finished_utc = ? WHERE id = ?")
+        sqlx::query("UPDATE jobs SET finished_utc = ?, success = ? WHERE id = ?")
             .bind(Some(finished_utc))
+            .bind(Some(success))
             .bind(id.as_bytes().as_slice())
             .execute(conn.deref_mut())
             .await?;
@@ -619,10 +622,11 @@ mod test {
         assert_eq!(job.id, job_id);
         assert_eq!(job.finished_utc, None);
 
-        db.job_finished(job_id).await?;
+        db.job_finished(job_id, true).await?;
         let job = db.job(job_id).await?;
 
         assert!(job.finished_utc.is_some());
+        assert_eq!(job.success, Some(true));
 
         Ok(())
     }

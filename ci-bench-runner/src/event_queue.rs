@@ -165,22 +165,21 @@ impl EventQueue {
                     db: db.clone(),
                 };
 
-                match github_event {
-                    AllowedEvent::IssueComment => handle_issue_comment(ctx)
-                        .await
-                        .expect("error handling issue comment"),
-                    AllowedEvent::PullRequest => handle_pr_update(ctx)
-                        .await
-                        .expect("error handling PR update"),
-                    AllowedEvent::PullRequestReview => handle_pr_review(ctx)
-                        .await
-                        .expect("error handling PR review"),
-                    AllowedEvent::Push => {
-                        bench_main(ctx).await.expect("error handling branch push")
-                    }
+                let result = match github_event {
+                    AllowedEvent::IssueComment => handle_issue_comment(ctx).await,
+                    AllowedEvent::PullRequest => handle_pr_update(ctx).await,
+                    AllowedEvent::PullRequestReview => handle_pr_review(ctx).await,
+                    AllowedEvent::Push => bench_main(ctx).await,
                 };
 
-                db.job_finished(job_id).await?;
+                if let Err(e) = &result {
+                    error!(
+                        cause = e.to_string(),
+                        "error handling event: {github_event:?}"
+                    );
+                }
+
+                db.job_finished(job_id, result.is_ok()).await?;
                 db.delete_event(event.id).await?;
             }
 
@@ -214,7 +213,7 @@ impl EventQueue {
 }
 
 /// Allowed GitHub events that we process
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum AllowedEvent {
     IssueComment,
     PullRequest,

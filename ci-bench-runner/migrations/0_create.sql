@@ -46,7 +46,8 @@ CREATE TABLE jobs(
     id BLOB PRIMARY KEY,
     event_queued_utc TEXT NOT NULL,
     created_utc TEXT NOT NULL,
-    finished_utc TEXT
+    finished_utc TEXT,
+    success INTEGER
 ) STRICT;
 
 CREATE TABLE result_comments(
