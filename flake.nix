@@ -40,10 +40,6 @@
             src = crateDir;
             cargoLock = {
               lockFile = "${crateDir}/Cargo.lock";
-              outputHashes = {
-                "octocrab-0.31.2" =
-                  "sha256-Gj3zevsE8o5/6hYryZGJ2XIL4yyveKdOud0YUZPhVys=";
-              };
             };
             nativeBuildInputs = buildDeps;
             buildInputs = runtimeDeps;
