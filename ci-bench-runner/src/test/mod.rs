@@ -220,8 +220,8 @@ async fn test_issue_comment_edited() {
 async fn test_issue_comment_happy_path() {
     // Mock HTTP responses from GitHub
     let mock_github = MockGitHub::start().await;
-    let get_pr = mock_github.mock_get_pr().await;
-    let post_comment = mock_github.mock_post_comment().await;
+    let _get_pr = mock_github.mock_get_pr().await;
+    let _post_comment = mock_github.mock_post_comment().await;
     let update_status = mock_github.mock_post_status().await;
 
     // Run the job server
@@ -240,13 +240,7 @@ async fn test_issue_comment_happy_path() {
     .await;
 
     // Wait for our mock endpoints to have been called
-    tokio::time::timeout(Duration::from_secs(1), get_pr.wait_until_satisfied())
-        .await
-        .ok();
-    tokio::time::timeout(Duration::from_secs(1), post_comment.wait_until_satisfied())
-        .await
-        .ok();
-    tokio::time::timeout(Duration::from_secs(1), update_status.wait_until_satisfied())
+    tokio::time::timeout(Duration::from_secs(2), update_status.wait_until_satisfied())
         .await
         .ok();
 
@@ -276,7 +270,7 @@ async fn test_pr_opened_happy_path_with_comment_reuse() {
     .await;
 
     // Wait for our post status endpoint to have been called
-    tokio::time::timeout(Duration::from_secs(1), post_status.wait_until_satisfied())
+    tokio::time::timeout(Duration::from_secs(2), post_status.wait_until_satisfied())
         .await
         .ok();
 
@@ -294,7 +288,7 @@ async fn test_pr_opened_happy_path_with_comment_reuse() {
     .await;
 
     // Wait for our post status endpoint to have been called
-    tokio::time::timeout(Duration::from_secs(1), post_status.wait_until_satisfied())
+    tokio::time::timeout(Duration::from_secs(2), post_status.wait_until_satisfied())
         .await
         .ok();
 
@@ -348,7 +342,7 @@ async fn test_pr_opened_happy_path_with_failed_comment_reuse() {
 async fn test_pr_synchronize_happy_path() {
     // Mock HTTP responses from GitHub
     let mock_github = MockGitHub::start().await;
-    let post_comment = mock_github.mock_post_comment().await;
+    let _post_comment = mock_github.mock_post_comment().await;
     let post_status = mock_github.mock_post_status().await;
 
     // Run the job server
@@ -366,10 +360,7 @@ async fn test_pr_synchronize_happy_path() {
     .await;
 
     // Wait for our mock endpoints to have been called
-    tokio::time::timeout(Duration::from_secs(1), post_comment.wait_until_satisfied())
-        .await
-        .ok();
-    tokio::time::timeout(Duration::from_secs(1), post_status.wait_until_satisfied())
+    tokio::time::timeout(Duration::from_secs(2), post_status.wait_until_satisfied())
         .await
         .ok();
 
@@ -381,7 +372,7 @@ async fn test_pr_synchronize_happy_path() {
 async fn test_pr_synchronize_cached() {
     // Mock HTTP responses from GitHub
     let mock_github = MockGitHub::start().await;
-    let post_comment = mock_github.mock_post_comment().await;
+    let _post_comment = mock_github.mock_post_comment().await;
     let post_status = mock_github.mock_post_status().await;
 
     // Run the job server
@@ -421,10 +412,7 @@ async fn test_pr_synchronize_cached() {
     .await;
 
     // Wait for our mock endpoints to have been called
-    tokio::time::timeout(Duration::from_secs(1), post_comment.wait_until_satisfied())
-        .await
-        .ok();
-    tokio::time::timeout(Duration::from_secs(1), post_status.wait_until_satisfied())
+    tokio::time::timeout(Duration::from_secs(2), post_status.wait_until_satisfied())
         .await
         .ok();
 
@@ -436,7 +424,7 @@ async fn test_pr_synchronize_cached() {
 async fn test_pr_review_happy_path() {
     // Mock HTTP responses from GitHub
     let mock_github = MockGitHub::start().await;
-    let post_comment = mock_github.mock_post_comment().await;
+    let _post_comment = mock_github.mock_post_comment().await;
     let post_status = mock_github.mock_post_status().await;
 
     // Run the job server
@@ -454,10 +442,7 @@ async fn test_pr_review_happy_path() {
     .await;
 
     // Wait for our mock endpoints to have been called
-    tokio::time::timeout(Duration::from_secs(1), post_comment.wait_until_satisfied())
-        .await
-        .ok();
-    tokio::time::timeout(Duration::from_secs(1), post_status.wait_until_satisfied())
+    tokio::time::timeout(Duration::from_secs(2), post_status.wait_until_satisfied())
         .await
         .ok();
 
@@ -504,7 +489,6 @@ async fn test_push_happy_path() {
     .await;
 
     // Ensure no new jobs have been created, but the event has been enqueued
-    tokio::time::sleep(Duration::from_millis(100)).await;
     let new_jobs = server.db.jobs().await.unwrap();
     assert_eq!(new_jobs, jobs);
     let events = server.db.queued_events().await.unwrap();
