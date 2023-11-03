@@ -100,7 +100,7 @@ pub async fn server(
     // Set up the axum application
     let app = Router::new()
         .route("/webhooks/github", post(handle_github_webhook))
-        .route("/jobs/:id", get(get_job_status))
+        .route("/jobs/:id", get(get_job_view))
         .route(
             "/comparisons/:commits/cachegrind-diff/:scenario",
             get(get_cachegrind_diff),
@@ -116,19 +116,19 @@ pub async fn server(
     Ok((server, addr))
 }
 
-/// Returns status information about the job
-async fn get_job_status(
+/// Returns information about the job
+async fn get_job_view(
     State(state): State<Arc<AppState>>,
     Path(id): Path<Uuid>,
 ) -> axum::response::Result<Response> {
     let status = state
         .event_queue
-        .job_status(id)
+        .job_view(id)
         .await
-        .map_err(|_| "Internal server error")?;
+        .map_err(|_| "internal server error")?;
 
     let response = match status {
-        None => (StatusCode::NOT_FOUND, "Not found").into_response(),
+        None => (StatusCode::NOT_FOUND, "not found").into_response(),
         Some(status) => Json(status).into_response(),
     };
 

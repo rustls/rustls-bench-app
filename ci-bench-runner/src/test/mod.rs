@@ -17,10 +17,12 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
+use uuid::Uuid;
 use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, MockGuard, MockServer, ResponseTemplate};
 
 use crate::db::{ScenarioDiff, ScenarioKind};
+use crate::event_queue::{JobStatus, JobView};
 use crate::runner::{BenchRunner, Log};
 use crate::{
     server, AppConfig, CommitIdentifier, Db, WEBHOOK_EVENT_HEADER, WEBHOOK_SIGNATURE_HEADER,
@@ -332,7 +334,7 @@ async fn test_pr_opened_happy_path_with_failed_comment_reuse() {
     // Wait for our post status endpoint to have been called
     tokio::time::timeout(Duration::from_secs(2), post_status.wait_until_satisfied())
         .await
-        .ok();
+        .unwrap();
 
     // Ensure the comment id has been updated
     let comment_id = server.db.result_comment_id(7).await.unwrap();
@@ -606,6 +608,50 @@ async fn test_get_cachegrind_diff() {
         "comparison not found for the provided commit hashes and scenario"
     );
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_get_job() {
+    let mock_github = MockGitHub::start().await;
+    let server = TestServer::start(&mock_github).await;
+    let client = reqwest::Client::default();
+
+    // Ensure the DB has a stored job result
+    let event_id = server.db.enqueue_event("foo", &[]).await.unwrap();
+    let job_id = server
+        .db
+        .new_job_for_event(event_id, OffsetDateTime::now_utc())
+        .await
+        .unwrap();
+
+    // Found, not finished, not active
+    let endpoint = format!("{}/jobs/{job_id}", server.base_url);
+    let response = client.get(&endpoint).send().await.unwrap();
+    let status = response.status();
+    assert_eq!(status, StatusCode::OK);
+    let body = response.bytes().await.unwrap();
+    let job_view: JobView = serde_json::from_slice(&body).unwrap();
+    assert_eq!(job_view.finished_utc, None);
+    assert_eq!(job_view.status, JobStatus::Failure);
+
+    // Found, finished, not active
+    server.db.job_finished(job_id, true).await.unwrap();
+    let response = client.get(endpoint).send().await.unwrap();
+    let status = response.status();
+    assert_eq!(status, StatusCode::OK);
+    let body = response.bytes().await.unwrap();
+    let job_view: JobView = serde_json::from_slice(&body).unwrap();
+    assert!(job_view.finished_utc.is_some());
+    assert_eq!(job_view.status, JobStatus::Success);
+
+    // Not found
+    let endpoint = format!("{}/jobs/{}", server.base_url, Uuid::new_v4());
+    let response = client.get(endpoint).send().await.unwrap();
+    let status = response.status();
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let body = response.bytes().await.unwrap();
+    let body = String::from_utf8_lossy(&body);
+    assert_eq!(body, "not found");
 }
 
 async fn post_webhook(

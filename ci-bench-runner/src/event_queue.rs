@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::body::Bytes;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
@@ -203,14 +204,14 @@ impl EventQueue {
         Ok(Some(event_id))
     }
 
-    /// Returns the status corresponding to the given job id, or `None` if the job could not be found
-    pub async fn job_status(&self, job_id: Uuid) -> anyhow::Result<Option<JobStatus>> {
+    /// Returns a user-facing view of the given job id, or `None` if the job could not be found
+    pub async fn job_view(&self, job_id: Uuid) -> anyhow::Result<Option<JobView>> {
         let Some(job) = self.db.maybe_job(job_id).await? else {
             return Ok(None);
         };
 
-        let active = *self.active_job_id.lock().unwrap() == Some(job.id);
-        Ok(Some(JobStatus { job, active }))
+        let active = *self.active_job_id.lock().unwrap() == Some(job_id);
+        Ok(Some(JobView::from_job(job, active)))
     }
 }
 
@@ -254,8 +255,41 @@ pub struct JobContext<'a> {
     pub db: Db,
 }
 
-#[derive(Serialize)]
-pub struct JobStatus {
-    pub job: BenchJob,
-    pub active: bool,
+#[derive(Serialize, Deserialize)]
+pub struct JobView {
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_utc: OffsetDateTime,
+    #[serde(
+        serialize_with = "time::serde::rfc3339::option::serialize",
+        deserialize_with = "time::serde::rfc3339::option::deserialize"
+    )]
+    pub finished_utc: Option<OffsetDateTime>,
+    pub status: JobStatus,
+}
+
+impl JobView {
+    fn from_job(job: BenchJob, active: bool) -> Self {
+        let status = match job.success {
+            None => match &job.finished_utc {
+                None if active => JobStatus::Pending,
+                None => JobStatus::Failure,
+                Some(_) => unreachable!("if the job finished, it's success field will be set"),
+            },
+            Some(true) => JobStatus::Success,
+            Some(false) => JobStatus::Failure,
+        };
+
+        Self {
+            created_utc: job.created_utc,
+            finished_utc: job.finished_utc,
+            status,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub enum JobStatus {
+    Pending,
+    Success,
+    Failure,
 }
