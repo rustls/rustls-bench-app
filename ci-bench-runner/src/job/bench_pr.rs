@@ -377,8 +377,7 @@ fn compare_refs(
     let baseline = read_results(&job_output_path.join("base/results/icounts.csv"))?;
     let candidate = read_results(&job_output_path.join("candidate/results/icounts.csv"))?;
     let (diffs, missing) = compare_results(
-        &job_output_path.join("base/results/cachegrind"),
-        &job_output_path.join("candidate/results/cachegrind"),
+        job_output_path,
         &baseline,
         &candidate,
         significance_thresholds,
@@ -494,8 +493,7 @@ fn markdown_comment(
 /// Returns an internal representation of the comparison between the baseline and the candidate
 /// measurements
 fn compare_results(
-    baseline_cachegrind_dir: &Path,
-    candidate_cachegrind_dir: &Path,
+    job_output_path: &Path,
     baseline: &HashMap<String, f64>,
     candidate: &HashMap<String, f64>,
     significance_thresholds: &HashMap<String, f64>,
@@ -508,8 +506,7 @@ fn compare_results(
             continue;
         };
 
-        let cachegrind_diff =
-            cachegrind_diff(baseline_cachegrind_dir, candidate_cachegrind_dir, scenario)?;
+        let cachegrind_diff = cachegrind_diff(job_output_path, scenario)?;
 
         diffs.push(ScenarioDiff {
             scenario_name: scenario.clone(),
@@ -620,35 +617,40 @@ fn table(s: &mut String, diffs: &[ScenarioDiff], cachegrind_diff_url: &str, emoj
 }
 
 /// Returns the detailed instruction diff between the baseline and the candidate
-pub fn cachegrind_diff(
-    baseline: &Path,
-    candidate: &Path,
-    scenario: &str,
-) -> anyhow::Result<String> {
+pub fn cachegrind_diff(job_output_path: &Path, scenario: &str) -> anyhow::Result<String> {
     // The latest version of valgrind has deprecated cg_diff, which has been superseded by
     // cg_annotate. Many systems are running older versions, though, so we are sticking with cg_diff
     // for the time being.
 
-    let tmp_path = Path::new("ci-bench-tmp");
-    let tmp = File::create(tmp_path).context("cannot create temp file for cg_diff")?;
+    let diffs_path = job_output_path.join("diffs");
+    fs::create_dir_all(&diffs_path).context("failed to create dir for cg_diff output")?;
+
+    let baseline_cachegrind_file_path = job_output_path
+        .join("base/results/cachegrind")
+        .join(scenario);
+    let candidate_cachegrind_file_path = job_output_path
+        .join("candidate/results/cachegrind")
+        .join(scenario);
+    let diff_file_path = diffs_path.join(scenario);
 
     // cg_diff generates a diff between two cachegrind output files in a custom format that is not
     // user-friendly
+    let diff_file = File::create(&diff_file_path).context("cannot create temp file for cg_diff")?;
     let cg_diff = Command::new("cg_diff")
         // remove per-compilation uniqueness in symbols, eg
         // _ZN9hashbrown3raw21RawTable$LT$T$C$A$GT$14reserve_rehash17hc60392f3f3eac4b2E.llvm.9716880419886440089 ->
         // _ZN9hashbrown3raw21RawTable$LT$T$C$A$GT$14reserve_rehashE
         .arg("--mod-funcname=s/17h[0-9a-f]+E\\.llvm\\.\\d+/E/")
-        .arg(baseline.join(scenario))
-        .arg(candidate.join(scenario))
-        .stdout(Stdio::from(tmp))
+        .arg(baseline_cachegrind_file_path)
+        .arg(candidate_cachegrind_file_path)
+        .stdout(Stdio::from(diff_file))
         .spawn()
         .context("cannot spawn cg_diff subprocess")?
         .wait()
         .context("error waiting for cg_diff to finish")?;
 
     if !cg_diff.success() {
-        anyhow::bail!(
+        bail!(
             "cg_diff finished with an error (code = {:?})",
             cg_diff.code()
         )
@@ -656,24 +658,25 @@ pub fn cachegrind_diff(
 
     // cg_annotate transforms the output of cg_diff into something a user can understand
     let cg_annotate = Command::new("cg_annotate")
-        .arg(tmp_path)
+        .arg(diff_file_path)
         .arg("--auto=no")
         .output()
         .context("error waiting for cg_annotate to finish")?;
 
+    let stdout =
+        String::from_utf8(cg_annotate.stdout).context("cg_annotate produced invalid UTF8")?;
+
     if !cg_annotate.status.success() {
-        anyhow::bail!(
-            "cg_annotate finished with an error (code = {:?})",
+        let stderr =
+            String::from_utf8(cg_annotate.stderr).context("cg_annotate produced invalid UTF8")?;
+
+        bail!(
+            "cg_annotate finished with an error (code = {:?}). Stdout:\n{stdout}\nStderr:\n{stderr}",
             cg_annotate.status.code()
         )
     }
 
-    let annotated =
-        String::from_utf8(cg_annotate.stdout).context("cg_annotate produced invalid UTF8")?;
-
-    fs::remove_file(tmp_path).ok();
-
-    Ok(annotated)
+    Ok(stdout)
 }
 
 static DEFAULT_NOISE_THRESHOLD: f64 = 0.002;
