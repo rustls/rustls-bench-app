@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::bail;
+use bencher_client::json::Jwt;
 use ctor::ctor;
 use hmac::digest::FixedOutput;
 use hmac::{Hmac, Mac};
@@ -694,6 +695,9 @@ fn test_config(tmp_path: &Path, github_url: String) -> Arc<AppConfig> {
         github_repo_owner: MockGitHub::REPO_OWNER.to_string(),
         github_repo_name: MockGitHub::REPO_NAME.to_string(),
         sentry_dsn: "".to_string(),
+        bencher_api_token: Jwt::test_token(),
+        bencher_project_id: None,
+        bencher_testbed_id: None,
         port: None,
     })
 }

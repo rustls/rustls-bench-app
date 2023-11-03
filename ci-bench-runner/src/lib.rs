@@ -20,6 +20,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use bencher_client::json::{Jwt, ResourceId};
 use serde::Deserialize;
 use sqlx::migrate::Migrator;
 use sqlx::SqliteConnection;
@@ -65,6 +66,12 @@ pub struct AppConfig {
     pub github_repo_name: String,
     /// Sentry DSN
     pub sentry_dsn: String,
+    /// Bencher API token
+    pub bencher_api_token: Jwt,
+    /// Bencher Project ID
+    pub bencher_project_id: Option<ResourceId>,
+    /// Bencher Testbed ID
+    pub bencher_testbed_id: Option<ResourceId>,
     /// Port where the application should listen (defaults to 0 if unset)
     pub port: Option<u16>,
 }

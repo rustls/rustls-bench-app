@@ -86,6 +86,8 @@ ansible-playbook \
   --extra-vars 'bench_app_repo=https://github.com/example/rustls-bench-app/' \
   --extra-vars 'bench_app_branch=example-branch' \
   --extra-vars 'bencher_api_token=jwt_header.jwt_payload.jwt_verify_signature' \
+  --extra-vars 'bencher_project_id=rustls' \
+  --extra-vars 'bencher_testbed_id=benchmarking-host' \
   playbook.yml
 ```
 
@@ -94,3 +96,5 @@ ansible-playbook \
 * The `bench_app_repo` and `bench_app_branch` should be configured to match your fork of this repository, and the
   branch you've pushed with your code changes (if applicable).
 * The `bencher_api_token` should be configured to a Bencher API token for [the `rustls` project](https://bencher.dev/perf/rustls)
+* The `bencher_project_id` should be configured to a Bencher Project UUID or slug. Optional value that defaults to `rustls`.
+* The `bencher_testbed_id` should be configured to a Bencher Testbed UUID or slug. Optional value that defaults to `benchmarking-host`.

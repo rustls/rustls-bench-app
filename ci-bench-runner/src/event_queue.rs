@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::body::Bytes;
+use bencher_client::BencherClient;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -25,6 +26,8 @@ pub struct EventQueue {
     event_enqueued_tx: UnboundedSender<()>,
     /// Database handle, used to persist events and recover in case of crashes
     db: Db,
+    /// Bencher API client
+    bencher_client: BencherClient,
 }
 
 impl EventQueue {
@@ -42,10 +45,14 @@ impl EventQueue {
         let (worker_tx, event_enqueued_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let active_job_id = Arc::new(Mutex::new(None));
+        let bencher_client = bencher_client::BencherClient::builder()
+            .token(config.bencher_api_token.clone())
+            .build();
         let queue = Self {
             active_job_id,
             event_enqueued_tx: worker_tx,
             db,
+            bencher_client,
         };
 
         queue.start_and_supervise_queue_processing(
@@ -119,6 +126,7 @@ impl EventQueue {
         let active_job_id = self.active_job_id.clone();
         let db = self.db.clone();
         let event_enqueued_tx = self.event_enqueued_tx.clone();
+        let bencher_client = self.bencher_client.clone();
 
         tokio::spawn(async move {
             // When starting up, we need to make sure we will process queued events that are already
@@ -172,6 +180,7 @@ impl EventQueue {
                         config: &config,
                         bench_runner: bench_runner.clone(),
                         db: db.clone(),
+                        bencher_client: &bencher_client,
                     };
 
                     let result = match github_event {
@@ -264,6 +273,7 @@ pub struct JobContext<'a> {
     pub octocrab: &'a CachedOctocrab,
     pub bench_runner: Arc<dyn BenchRunner>,
     pub db: Db,
+    pub bencher_client: &'a BencherClient,
 }
 
 #[derive(Serialize, Deserialize)]
