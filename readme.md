@@ -30,10 +30,19 @@ webhook's URL _and_ a secret to ensure event authenticity):
 - Pull request review.
 - Push.
 
-Make sure to set the GitHub webook URL for your application with the correct 
+Make sure to set the GitHub webook URL for your application with the correct
 `/webhooks/github` route, e.g.:
 
 - `https://my-domain.example.com/webhooks/github`
+
+#### Bencher
+
+The bench runner saves all of the results from `main` both locally and to [Bencher].
+In order to set up Bencher, you will need to set the following configuration options:
+
+- `bencher_api_token`: An API token for the Bencher Project.
+- `bencher_project_id`: (Optional) The Bencher Project UUID or slug. Defaults to `rustls`.
+- `bencher_testbed_id`: (Optional) The Bencher Testbed UUID or slug. Defaults to `benchmarking-host`.
 
 #### Server
 
@@ -44,7 +53,7 @@ Turbo Boost) and hyper threading. This needs to be done at the BIOS / UEFI level
 
 The following features are supported:
 
-- Run the benchmarks on every push to `main` and store the results.
+- Run the benchmarks on every push to `main` and store the results both locally and to [Bencher].
 - Calculate a per-benchmark significance threshold based on the result history for the `main` branch.
 - Run the benchmarks on pull requests, comparing the results against the pull request's base branch.
   For security, comparison bench runs are only triggered in the following scenarios:
@@ -77,3 +86,4 @@ directory.
 [Nix flake]: https://zero-to-nix.com/concepts/flakes
 [Install Nix]: https://nixos.org/
 [Direnv]: https://direnv.net/
+[Bencher]: https://bencher.dev/
