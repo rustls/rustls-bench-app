@@ -15,17 +15,14 @@
           cargoToml =
             builtins.fromTOML (builtins.readFile "${crateDir}/Cargo.toml");
 
-          runtimeDeps = with pkgs; [ ];
-          buildDeps = with pkgs; [ ];
-          devDeps = with pkgs; [ pkgs.ansible ];
+          devDeps = with pkgs; [ ansible ansible-lint ];
 
           mkDevShell = rustc:
             pkgs.mkShell {
               shellHook = ''
                 export RUST_SRC_PATH=${pkgs.rustPlatform.rustLibSrc}
               '';
-              buildInputs = runtimeDeps;
-              nativeBuildInputs = buildDeps ++ devDeps ++ [ rustc ];
+              nativeBuildInputs = devDeps ++ [ rustc ];
             };
         in {
           _module.args.pkgs = import inputs.nixpkgs {
@@ -41,8 +38,6 @@
             cargoLock = {
               lockFile = "${crateDir}/Cargo.lock";
             };
-            nativeBuildInputs = buildDeps;
-            buildInputs = runtimeDeps;
             doCheck = false; # Some tests require platform certs.
           };
 
