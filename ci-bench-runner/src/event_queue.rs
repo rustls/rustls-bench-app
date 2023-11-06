@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -262,6 +263,16 @@ pub struct JobContext<'a> {
     pub octocrab: &'a CachedOctocrab,
     pub bench_runner: Arc<dyn BenchRunner>,
     pub db: Db,
+}
+
+impl<'a> Debug for JobContext<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JobContext")
+            .field("event", &self.event)
+            .field("job_id", &self.job_id)
+            .field("job_output_dir", &self.job_output_dir)
+            .finish()
+    }
 }
 
 #[derive(Serialize, Deserialize)]
