@@ -79,7 +79,7 @@ pub mod api {
 }
 
 /// Provides access to an authenticated `Octocrab` client
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct CachedOctocrab {
     /// Initial GitHub client, authenticated as our GitHub App
     app_client: Octocrab,
