@@ -142,11 +142,14 @@ async fn get_cachegrind_diff(
 ) -> axum::response::Result<String> {
     // Extract commit hashes from URL
     let mut commit_parts = compared_commits.split(':');
-    let baseline_commit = commit_parts.next().ok_or("malformed URL")?;
-    let candidate_commit = commit_parts.next().ok_or("malformed URL")?;
-    if commit_parts.next().is_some() {
-        Err((StatusCode::BAD_REQUEST, "malformed URL"))?;
-    }
+    let (baseline_commit, candidate_commit) = match (
+        commit_parts.next(),
+        commit_parts.next(),
+        commit_parts.next(),
+    ) {
+        (Some(baseline), Some(candidate), None) => (baseline, candidate),
+        _ => Err((StatusCode::BAD_REQUEST, "malformed URL"))?,
+    };
 
     let result = state
         .db
