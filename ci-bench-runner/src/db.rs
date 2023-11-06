@@ -76,6 +76,7 @@ pub struct BenchResult {
 }
 
 /// The results of a comparison between two branches of rustls
+#[derive(Debug)]
 pub struct ComparisonResult {
     /// The diffs, per scenario
     pub diffs: Vec<ScenarioDiff>,
