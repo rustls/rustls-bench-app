@@ -52,18 +52,17 @@ impl EventQueue {
             config,
             bench_runner,
             octocrab,
-        );
-        queue
+        )
     }
 
     /// Starts and supervises the background queue processing task
     fn start_and_supervise_queue_processing(
-        &self,
+        self,
         event_enqueued_rx: UnboundedReceiver<()>,
         config: Arc<AppConfig>,
         bench_runner: Arc<dyn BenchRunner>,
         octocrab: CachedOctocrab,
-    ) {
+    ) -> Self {
         let active_job_id = self.active_job_id.clone();
         let queue = self.clone();
         let event_enqueued_rx = Arc::new(tokio::sync::Mutex::new(event_enqueued_rx));
@@ -102,6 +101,8 @@ impl EventQueue {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         });
+
+        self
     }
 
     /// Spawns a tokio task to process queued events in the background.
