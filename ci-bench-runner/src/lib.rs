@@ -222,7 +222,7 @@ pub static WEBHOOK_SIGNATURE_HEADER: &str = "X-Hub-Signature-256";
 pub static WEBHOOK_EVENT_HEADER: &str = "X-GitHub-Event";
 
 /// Identifies a specific commit in a repository
-#[derive(Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CommitIdentifier {
     /// The URL at which the repository can be cloned
     pub clone_url: String,
