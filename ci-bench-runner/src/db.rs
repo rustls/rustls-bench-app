@@ -64,7 +64,7 @@ pub struct BenchJob {
 }
 
 /// A result for a specific benchmark scenario
-#[derive(sqlx::FromRow)]
+#[derive(Debug, sqlx::FromRow)]
 pub struct BenchResult {
     /// The scenario's name
     pub scenario_name: String,
