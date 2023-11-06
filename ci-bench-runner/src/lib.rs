@@ -43,7 +43,7 @@ struct AppState {
 }
 
 /// The application's configuration
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
 pub struct AppConfig {
     /// Base URL used for the GitHub API (used to mock out the API in tests)
     pub github_api_url_override: Option<String>,
