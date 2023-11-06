@@ -151,18 +151,15 @@ async fn get_cachegrind_diff(
         _ => Err((StatusCode::BAD_REQUEST, "malformed URL"))?,
     };
 
-    let result = state
+    Ok(state
         .db
         .cachegrind_diff(baseline_commit, candidate_commit, &scenario_name)
         .await
-        .map_err(|_| "internal server error")?;
-
-    let result = result.ok_or((
-        StatusCode::NOT_FOUND,
-        "comparison not found for the provided commit hashes and scenario",
-    ))?;
-
-    Ok(result)
+        .map_err(|_| "internal server error")?
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            "comparison not found for the provided commit hashes and scenario",
+        ))?)
 }
 
 /// Handles an incoming GitHub webhook
