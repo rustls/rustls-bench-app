@@ -69,6 +69,7 @@ pub mod api {
     #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct GitHubUser {
         pub login: String,
+        pub id: u64,
     }
 
     #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
