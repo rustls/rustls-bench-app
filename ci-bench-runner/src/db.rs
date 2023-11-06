@@ -125,7 +125,7 @@ impl TryFrom<i64> for ScenarioKind {
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(ScenarioKind::Icount),
+            0 => Ok(Self::Icount),
             kind => bail!("invalid scenario kind: {kind}"),
         }
     }
