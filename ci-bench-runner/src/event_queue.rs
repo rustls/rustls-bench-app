@@ -237,15 +237,13 @@ pub enum AllowedEvent {
 
 impl AllowedEvent {
     fn from_event_string(event: &str) -> Option<Self> {
-        let kind = match event {
+        Some(match event {
             "issue_comment" => Self::IssueComment,
             "push" => Self::Push,
             "pull_request" => Self::PullRequest,
             "pull_request_review" => Self::PullRequestReview,
             _ => return None,
-        };
-
-        Some(kind)
+        })
     }
 }
 
