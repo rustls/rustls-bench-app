@@ -275,7 +275,7 @@ impl<'a> Debug for JobContext<'a> {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct JobView {
     #[serde(with = "time::serde::rfc3339")]
     pub created_utc: OffsetDateTime,
