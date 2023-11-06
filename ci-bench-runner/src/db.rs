@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// An enqueued GitHub event
+#[derive(Debug)]
 pub struct QueuedEvent {
     /// An internal id for this event (i.e. not GitHub's)
     pub id: Uuid,
