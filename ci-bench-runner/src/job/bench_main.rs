@@ -14,7 +14,7 @@ use crate::CommitIdentifier;
 
 use super::bencher::{new_bencher_report, send_report_to_bencher};
 
-const BRANCH_NAME: &str = "main";
+pub const MAIN_BRANCH: &str = "main";
 
 /// Handle a push to main
 ///
@@ -50,7 +50,7 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
         let result = bench_runner.checkout_and_run_benchmarks(
             &CommitIdentifier {
                 clone_url: payload.repository.clone_url,
-                branch_name: BRANCH_NAME.to_string(),
+                branch_name: MAIN_BRANCH.to_string(),
                 commit_sha,
             },
             &base_repo_path,
@@ -84,7 +84,7 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
         .context("failed to store benchmark results")?;
     let json_new_report = new_bencher_report(
         &ctx.config,
-        BRANCH_NAME,
+        MAIN_BRANCH,
         &payload.after,
         start_time,
         end_time,

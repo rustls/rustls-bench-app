@@ -8,6 +8,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, bail, Context};
+use bencher_client::json::ResourceId;
 use octocrab::models::pulls::PullRequest;
 use octocrab::models::webhook_events::payload::PullRequestWebhookEventAction;
 use octocrab::models::webhook_events::{WebhookEvent, WebhookEventPayload};
@@ -21,6 +22,8 @@ use crate::db::{BenchResult, ComparisonResult, ScenarioDiff, ScenarioKind};
 use crate::event_queue::JobContext;
 use crate::github::api::{CommentEvent, PullRequestReviewEvent};
 use crate::github::{self, update_commit_status};
+use crate::job::bench_main::MAIN_BRANCH;
+use crate::job::bencher::DEFAULT_PROJECT_ID;
 use crate::job::read_results;
 use crate::runner::{write_logs_for_run, BenchRunner, Log};
 use crate::CommitIdentifier;
@@ -226,7 +229,7 @@ pub async fn bench_pr(
         "{}/comparisons/{}:{}/cachegrind-diff",
         ctx.config.app_base_url, branches.baseline.commit_sha, branches.candidate.commit_sha
     );
-    let mut comment = markdown_comment(&branches, result, &cachegrind_diff_url);
+    let mut comment = markdown_comment(&branches, result, &cachegrind_diff_url, ctx.config.bencher_project_id.as_ref());
     github::maybe_truncate_comment(&mut comment);
 
     let update_result = try_update_comment(pr_number, &comment, &octocrab, &ctx).await;
@@ -448,13 +451,22 @@ fn markdown_comment(
     branches: &PrBranches,
     result: Result<ComparisonResult, BenchPrError>,
     diff_url: &str,
+    project_id: Option<&ResourceId>,
 ) -> String {
-    fn write_checkout_details(s: &mut String, branches: &PrBranches) {
+    fn branch_name(name: String, project_id: Option<&ResourceId>) -> String {
+        if name == MAIN_BRANCH {
+            let project = project_id.map(AsRef::as_ref).unwrap_or(DEFAULT_PROJECT_ID);
+            format!("[{name}](https://bencher.dev/perf/{project})")
+        } else {
+            name
+        }
+    }
+    fn write_checkout_details(s: &mut String, branches: &PrBranches, project_id: Option<&ResourceId>,) {
         writeln!(s, "- Base repo: {}", branches.baseline.clone_url).ok();
         writeln!(
             s,
             "- Base branch: {} ({})",
-            branches.baseline.branch_name, branches.baseline.commit_sha,
+            branch_name(branches.baseline.branch_name.clone(), project_id), branches.baseline.commit_sha,
         )
         .ok();
         writeln!(s, "- Candidate repo: {}", branches.candidate.clone_url).ok();
@@ -471,14 +483,14 @@ fn markdown_comment(
         Ok(bench_results) => {
             s = print_report(bench_results, diff_url);
             writeln!(s, "### Checkout details").ok();
-            write_checkout_details(&mut s, branches);
+            write_checkout_details(&mut s, branches, project_id);
         }
         Err(error) => {
             writeln!(s, "# Error running benchmarks").ok();
             writeln!(s, "Cause:").ok();
             writeln!(s, "```\n{:?}\n```", error.error).ok();
             writeln!(s, "Checkout details:").ok();
-            write_checkout_details(&mut s, branches);
+            write_checkout_details(&mut s, branches, project_id);
             writeln!(s, "## Logs").ok();
             writeln!(s, "### Candidate").ok();
             write_logs_for_run(&mut s, &error.logs.candidate);

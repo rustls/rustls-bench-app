@@ -11,7 +11,7 @@ use bencher_client::{
 
 use crate::AppConfig;
 
-const DEFAULT_PROJECT_ID: &str = "rustls";
+pub const DEFAULT_PROJECT_ID: &str = "rustls";
 const DEFAULT_TESTBED_ID: &str = "benchmarking-host";
 
 /// Create a new Bencher report
