@@ -75,7 +75,7 @@ impl EventQueue {
                     octocrab.clone(),
                 );
 
-                info!("background task started for event queue");
+                info!("background task started for event queue job {active_job_id:?}");
                 match background_task.await {
                     Ok(Ok(_)) => {
                         // The task finished normally, no need to restart it
@@ -85,14 +85,14 @@ impl EventQueue {
                         // The task finished with an error
                         error!(
                             cause = e.to_string(),
-                            "job queue background task errored, restarting in 1s"
+                            "job queue background task {active_job_id:?} errored, restarting in 1s"
                         );
                     }
                     Err(e) => {
                         // The task panicked or was cancelled
                         error!(
                             cause = e.to_string(),
-                            "job queue background task crashed, restarting in 1s"
+                            "job queue background task {active_job_id:?} crashed, restarting in 1s"
                         );
                     }
                 }
