@@ -181,7 +181,7 @@ async fn handle_github_webhook(
     };
 
     if !verify_webhook_signature(&body, signature, &state.config.webhook_secret) {
-        trace!("invalid signature, ignoring event");
+        trace!("{WEBHOOK_SIGNATURE_HEADER} invalid signature, ignoring event");
         return StatusCode::BAD_REQUEST;
     }
 
