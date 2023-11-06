@@ -426,18 +426,19 @@ fn calculate_significance_thresholds(historical_results: Vec<BenchResult>) -> Ha
     outlier_bounds
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PrBranches {
     pub baseline: CommitIdentifier,
     pub candidate: CommitIdentifier,
 }
 
+#[derive(Debug)]
 struct BenchPrError {
     error: anyhow::Error,
     logs: BenchPrLogs,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct BenchPrLogs {
     base: Vec<Log>,
     candidate: Vec<Log>,
