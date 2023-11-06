@@ -41,9 +41,8 @@ impl EventQueue {
     ) -> Self {
         let (worker_tx, event_enqueued_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let active_job_id = Arc::new(Mutex::new(None));
         let queue = Self {
-            active_job_id,
+            active_job_id: Arc::new(Mutex::new(None)),
             event_enqueued_tx: worker_tx,
             db,
         };
