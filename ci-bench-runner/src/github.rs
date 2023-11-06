@@ -19,21 +19,21 @@ pub mod api {
     use octocrab::models::pulls::PullRequest;
     use serde::Deserialize;
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, PartialEq, Deserialize)]
     pub struct PullRequestReviewEvent {
         pub action: String,
         pub review: Review,
         pub pull_request: PullRequest,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct Review {
         pub author_association: String,
         pub state: String,
         pub commit_id: String,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct PushEvent {
         #[serde(rename = "ref")]
         pub git_ref: String,
@@ -42,37 +42,37 @@ pub mod api {
         pub deleted: bool,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct CommentEvent {
         pub action: String,
         pub comment: Comment,
         pub issue: Issue,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct Comment {
         pub author_association: String,
         pub body: String,
         pub user: GitHubUser,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct Issue {
         pub number: u64,
         pub pull_request: Option<PullRequestLite>,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct PullRequestLite {
         pub url: String,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct GitHubUser {
         pub login: String,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct Repo {
         pub clone_url: String,
     }
