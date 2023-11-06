@@ -1,0 +1,69 @@
+name: Rust
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ci-bench-runner
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ci-bench-runner
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --locked -- --deny warnings
+
+  docs:
+    name: Check for documentation errors
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ci-bench-runner
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: cargo doc
+        run: cargo doc --locked --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: -Dwarnings
+
+  stable:
+    name: Stable Rust
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ci-bench-runner
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install stable rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+    - name: Install valgrind
+      run: sudo apt-get install -y valgrind
+    - name: Build
+      run: cargo build --locked --verbose
+    - name: Run tests
+      run: cargo test --locked --verbose
