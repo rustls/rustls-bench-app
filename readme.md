@@ -30,15 +30,25 @@ webhook's URL _and_ a secret to ensure event authenticity):
 - Pull request review.
 - Push.
 
-Make sure to set the GitHub webook URL for your application with the correct 
+Make sure to set the GitHub webook URL for your application with the correct
 `/webhooks/github` route, e.g.:
 
 - `https://my-domain.example.com/webhooks/github`
 
-#### Server
+#### Hardware settings
 
 To reduce noise, the server should be configured to disable dynamic frequency scaling (also known as
 Turbo Boost) and hyper threading. This needs to be done at the BIOS / UEFI level.
+
+#### Bencher.dev project
+
+The bench runner saves the results from `main` to a local database, but it can also push them to
+[Bencher.dev] for visualization. For that, you will need to:
+
+- Set up a project
+- Create a testbed in the project
+- Create an API token (tokens aren't scoped, so if you are going to share them with others you might
+  want to create a unique Bencher.dev account just for this project)
 
 ## Features
 
@@ -77,3 +87,4 @@ directory.
 [Nix flake]: https://zero-to-nix.com/concepts/flakes
 [Install Nix]: https://nixos.org/
 [Direnv]: https://direnv.net/
+[Bencher.dev]: https://bencher.dev/

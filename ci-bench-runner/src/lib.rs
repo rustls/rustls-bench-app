@@ -1,25 +1,27 @@
 #[cfg(test)]
 mod test;
 
+mod bencher_dev;
 mod db;
 mod event_queue;
 mod github;
 mod job;
 mod runner;
 
-use anyhow::Context;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use anyhow::Context;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use bencher_client::json::Jwt;
 use serde::Deserialize;
 use sqlx::migrate::Migrator;
 use sqlx::SqliteConnection;
@@ -67,6 +69,19 @@ pub struct AppConfig {
     pub sentry_dsn: String,
     /// Port where the application should listen (defaults to 0 if unset)
     pub port: Option<u16>,
+    /// Optional configuration to publish benchmark results to bencher.dev
+    pub bencher: Option<BencherConfig>,
+}
+
+/// Bencher.dev's configuration
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
+pub struct BencherConfig {
+    /// Bencher.dev API token
+    pub api_token: Jwt,
+    /// Bencher.dev project id or slug
+    pub project_id: String,
+    /// Bencher.dev testbed id or slug
+    pub testbed_id: String,
 }
 
 /// Creates a new instance of the HTTP server and returns the address at which it is listening

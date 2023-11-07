@@ -695,6 +695,7 @@ fn test_config(tmp_path: &Path, github_url: String) -> Arc<AppConfig> {
         github_repo_name: MockGitHub::REPO_NAME.to_string(),
         sentry_dsn: "".to_string(),
         port: None,
+        bencher: None,
     })
 }
 
