@@ -15,3 +15,4 @@
 - name: Update to latest stable
   become_user: "{{ app_user }}"
   ansible.builtin.command: /home/{{ app_user }}/.cargo/bin/rustup update
+  changed_when: true
