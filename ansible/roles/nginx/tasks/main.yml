@@ -23,6 +23,7 @@
   ansible.builtin.template:
     src: hostname.conf
     dest: /etc/nginx/sites-enabled/{{ hostname }}.conf
+    mode: u=rw,g=r,o=r
 - name: Reload nginx
   ansible.builtin.systemd_service:
     name: nginx

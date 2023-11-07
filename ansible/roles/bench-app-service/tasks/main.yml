@@ -8,6 +8,7 @@
     state: directory
     owner: "{{ app_user }}"
     group: "{{ app_user }}"
+    mode: u=rwx,g=r,o=r
   tags:
     - setup
 - name: Create PR build log directory
@@ -16,6 +17,7 @@
     state: directory
     owner: "{{ app_user }}"
     group: "{{ app_user }}"
+    mode: u=rwx,g=r,o=r
   tags:
     - setup
 - name: Create result directory
@@ -24,6 +26,7 @@
     state: directory
     owner: "{{ app_user }}"
     group: "{{ app_user }}"
+    mode: u=rwx,g=r,o=r
   tags:
     - setup
 - name: Upload app config
@@ -32,6 +35,7 @@
     dest: /home/{{ app_user }}/server/config.json
     owner: "{{ app_user }}"
     group: "{{ app_user }}"
+    mode: u=rw
   notify:
     - start app
 - name: Upload systemd service file
@@ -40,5 +44,6 @@
     dest: /etc/systemd/system
     owner: root
     group: root
+    mode: u=rw,g=r,o=r
   notify:
     - start app

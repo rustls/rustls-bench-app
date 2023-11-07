@@ -13,6 +13,7 @@
     dest: /etc/systemd/system
     owner: root
     group: root
+    mode: u=rw,g=r,o=r
 - name: Enable systemd service
   ansible.builtin.systemd_service:
     name: set-scaling-governor
