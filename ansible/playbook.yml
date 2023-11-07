@@ -44,6 +44,6 @@
         - build-and-deploy
     - name: Setup benchmarking application service
       ansible.builtin.import_role:
-        name: bench-app-service
+        name: bench_app_service
       tags:
         - build-and-deploy
