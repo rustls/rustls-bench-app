@@ -8,5 +8,12 @@
   "github_repo_owner": "{{ github_repo_owner }}",
   "github_repo_name": "{{ github_repo_name }}",
   "sentry_dsn": "{{ sentry_dsn }}",
+  {% if bencher is defined %}
+  "bencher": {
+    "api_token": "{{ bencher.api_token }}",
+    "project_id": "{{ bencher.project_id }}",
+    "testbed_id": "{{ bencher.testbed_id }}"
+  },
+  {% endif %}
   "port": 3000
 }

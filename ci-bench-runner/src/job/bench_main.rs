@@ -2,14 +2,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context};
+use bencher_client::json::DateTime;
 use tempfile::TempDir;
-use tracing::trace;
+use tracing::{trace, warn};
 
 use crate::event_queue::JobContext;
 use crate::github::api::PushEvent;
 use crate::job::read_results;
 use crate::runner::write_logs_for_run;
 use crate::CommitIdentifier;
+
+pub static MAIN_BRANCH: &str = "main";
 
 /// Handle a push to main
 ///
@@ -32,9 +35,12 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    let benchmark_run_start = DateTime::now();
+
     // Run the benchmarks on the main branch
     let job_output_dir = ctx.job_output_dir.clone();
     let bench_runner = ctx.bench_runner.clone();
+    let commit_sha = payload.after.clone();
     let icounts_path = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         let base_repo = TempDir::new().context("unable to create temp dir")?;
         let base_repo_path = base_repo.path().to_owned();
@@ -43,8 +49,8 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
         let result = bench_runner.checkout_and_run_benchmarks(
             &CommitIdentifier {
                 clone_url: payload.repository.clone_url,
-                branch_name: "main".to_string(),
-                commit_sha: payload.after,
+                branch_name: MAIN_BRANCH.to_string(),
+                commit_sha,
             },
             &base_repo_path,
             &job_output_dir,
@@ -67,13 +73,35 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
     .await
     .context("tokio task crashed unexpectedly")??;
 
+    let benchmark_run_end = DateTime::now();
+
     // Store the benchmark results in the database
     let icounts =
         read_results(&icounts_path).context("failed to read instruction counts from file")?;
     ctx.db
-        .store_run_results(icounts.into_iter().collect())
+        .store_run_results(icounts.clone().into_iter().collect())
         .await
         .context("failed to store benchmark results")?;
+
+    // Send the benchmark results to bencher.dev
+    if let Some(bencher_dev) = ctx.bencher_dev {
+        let result = bencher_dev
+            .track_icounts(
+                MAIN_BRANCH,
+                &payload.after,
+                benchmark_run_start,
+                benchmark_run_end,
+                icounts,
+            )
+            .await
+            .context("failed to send results to bencher.dev");
+
+        if let Err(e) = result {
+            warn!("{e:?}");
+        } else {
+            trace!("pushed benchmark results to bencher.dev");
+        }
+    }
 
     Ok(())
 }

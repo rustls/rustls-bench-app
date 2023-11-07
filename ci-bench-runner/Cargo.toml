@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.75"
 axum = "0.6.20"
+bencher_client = { git = "https://github.com/bencherdev/bencher", rev = "d0532976" }
 hex = "0.4.3"
 hmac = "0.12.1"
 hyper = { version = "0.14.27", default-features = false }

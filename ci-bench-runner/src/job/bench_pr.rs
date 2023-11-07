@@ -226,7 +226,12 @@ pub async fn bench_pr(
         "{}/comparisons/{}:{}/cachegrind-diff",
         ctx.config.app_base_url, branches.baseline.commit_sha, branches.candidate.commit_sha
     );
-    let mut comment = markdown_comment(&branches, result, &cachegrind_diff_url);
+    let mut comment = markdown_comment(
+        &branches,
+        result,
+        &cachegrind_diff_url,
+        ctx.bencher_dev.map(|b| b.config.project_id.as_str()),
+    );
     github::maybe_truncate_comment(&mut comment);
 
     let update_result = try_update_comment(pr_number, &comment, &octocrab, &ctx).await;
@@ -449,8 +454,10 @@ fn markdown_comment(
     branches: &PrBranches,
     result: Result<ComparisonResult, BenchPrError>,
     diff_url: &str,
+    bencher_project_id: Option<&str>,
 ) -> String {
     fn write_checkout_details(s: &mut String, branches: &PrBranches) {
+        writeln!(s, "Checkout details:").ok();
         writeln!(s, "- Base repo: {}", branches.baseline.clone_url).ok();
         writeln!(
             s,
@@ -471,14 +478,22 @@ fn markdown_comment(
     match result {
         Ok(bench_results) => {
             s = print_report(bench_results, diff_url);
-            writeln!(s, "### Checkout details").ok();
+            writeln!(s, "## Additional information").ok();
+
+            if let Some(project_id) = bencher_project_id {
+                writeln!(
+                    s,
+                    "\n[Historical results](https://bencher.dev/perf/{project_id})\n"
+                )
+                .ok();
+            }
+
             write_checkout_details(&mut s, branches);
         }
         Err(error) => {
             writeln!(s, "# Error running benchmarks").ok();
             writeln!(s, "Cause:").ok();
             writeln!(s, "```\n{:?}\n```", error.error).ok();
-            writeln!(s, "Checkout details:").ok();
             write_checkout_details(&mut s, branches);
             writeln!(s, "## Logs").ok();
             writeln!(s, "### Candidate").ok();

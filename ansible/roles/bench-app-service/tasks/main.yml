@@ -27,7 +27,7 @@
     - 'setup'
 - name: 'upload app config'
   template:
-    src: 'config.json'
+    src: 'config.json.j2'
     dest: '/home/{{app_user}}/server/config.json'
     owner: '{{app_user}}'
     group: '{{app_user}}'

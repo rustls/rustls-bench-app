@@ -11,6 +11,7 @@ use tokio::task::JoinHandle;
 use tracing::{error, info, trace_span, Instrument};
 use uuid::Uuid;
 
+use crate::bencher_dev::BencherDev;
 use crate::db::{BenchJob, Db};
 use crate::github::CachedOctocrab;
 use crate::job::{bench_main, handle_issue_comment, handle_pr_review, handle_pr_update};
@@ -26,6 +27,8 @@ pub struct EventQueue {
     event_enqueued_tx: UnboundedSender<()>,
     /// Database handle, used to persist events and recover in case of crashes
     db: Db,
+    /// Bencher.dev client
+    bencher_dev: Option<BencherDev>,
 }
 
 impl EventQueue {
@@ -46,6 +49,7 @@ impl EventQueue {
             active_job_id: Arc::new(Mutex::new(None)),
             event_enqueued_tx: worker_tx,
             db,
+            bencher_dev: config.bencher.clone().map(BencherDev::new),
         };
 
         queue.start_and_supervise_queue_processing(
@@ -120,6 +124,7 @@ impl EventQueue {
         let active_job_id = self.active_job_id.clone();
         let db = self.db.clone();
         let event_enqueued_tx = self.event_enqueued_tx.clone();
+        let bencher_dev = self.bencher_dev.clone();
 
         tokio::spawn(async move {
             // When starting up, we need to make sure we will process queued events that are already
@@ -173,6 +178,7 @@ impl EventQueue {
                         config: &config,
                         bench_runner: bench_runner.clone(),
                         db: db.clone(),
+                        bencher_dev: bencher_dev.as_ref(),
                     };
 
                     let result = match github_event {
@@ -261,6 +267,7 @@ pub struct JobContext<'a> {
 
     pub config: &'a AppConfig,
     pub octocrab: &'a CachedOctocrab,
+    pub bencher_dev: Option<&'a BencherDev>,
     pub bench_runner: Arc<dyn BenchRunner>,
     pub db: Db,
 }
