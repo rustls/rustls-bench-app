@@ -1,6 +1,7 @@
-- name: 'start app'
-  systemd_service:
-    name: 'ci-bench-runner'
-    state: 'restarted'
+---
+- name: Start app
+  ansible.builtin.systemd_service:
+    name: ci-bench-runner
+    state: restarted
     enabled: true
     daemon_reload: true

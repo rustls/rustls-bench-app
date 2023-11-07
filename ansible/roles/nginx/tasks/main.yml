@@ -1,35 +1,36 @@
-- name: 'install required packages'
-  apt:
+---
+- name: Install required packages
+  ansible.builtin.apt:
     pkg:
-      - 'nginx'
-      - 'certbot'
-      - 'python3-certbot-nginx'
-      - 'cron'
-    state: 'present'
-- name: 'allow incoming HTTP(S) traffic'
+      - nginx
+      - certbot
+      - python3-certbot-nginx
+      - cron
+    state: present
+- name: Allow incoming HTTP(S) traffic
   community.general.ufw:
-    rule: 'allow'
-    name: 'Nginx Full'
-- name: 'get certificate for the first time'
-  command: 'certbot -n --nginx certonly -d {{ hostname }} --agree-tos --email {{ letsencrypt_email }}'
+    rule: allow
+    name: Nginx Full
+- name: Get certificate for the first time
+  ansible.builtin.command: certbot -n --nginx certonly -d {{ hostname }} --agree-tos --email {{ letsencrypt_email }}
   args:
-    creates: '/etc/letsencrypt/live/{{ hostname }}'
-- name: 'remove default nginx site'
-  file:
-    path: '/etc/nginx/sites-enabled/default'
-    state: 'absent'
-- name: 'add nginx configuration'
-  template:
-    src: 'hostname.conf'
-    dest: '/etc/nginx/sites-enabled/{{ hostname }}.conf'
-- name: 'reload nginx'
-  systemd_service:
-    name: 'nginx'
-    state: 'reloaded'
+    creates: /etc/letsencrypt/live/{{ hostname }}
+- name: Remove default nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+- name: Add nginx configuration
+  ansible.builtin.template:
+    src: hostname.conf
+    dest: /etc/nginx/sites-enabled/{{ hostname }}.conf
+- name: Reload nginx
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: reloaded
     enabled: true
-- name: 'setup cronjob for certificate renewal'
-  cron:
-    name: 'certbot-renewal'
-    job: "/bin/bash -lc 'certbot -q renew'"
-    minute: '0'
-    hour: '0'
+- name: Setup cronjob for certificate renewal
+  ansible.builtin.cron:
+    name: certbot-renewal
+    job: /bin/bash -lc 'certbot -q renew'
+    minute: "0"
+    hour: "0"

@@ -1,43 +1,44 @@
-- name: 'Install valgrind'
-  apt:
+---
+- name: Install valgrind
+  ansible.builtin.apt:
     name: valgrind
-- name: 'create app directory'
-  file:
-    path: /home/{{app_user}}/server
+- name: Create app directory
+  ansible.builtin.file:
+    path: /home/{{ app_user }}/server
     state: directory
-    owner: '{{app_user}}'
-    group: '{{app_user}}'
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
   tags:
-    - 'setup'
-- name: 'create PR build log directory'
-  file:
-    path: /home/{{app_user}}/server/job-output
+    - setup
+- name: Create PR build log directory
+  ansible.builtin.file:
+    path: /home/{{ app_user }}/server/job-output
     state: directory
-    owner: '{{app_user}}'
-    group: '{{app_user}}'
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
   tags:
-    - 'setup'
-- name: 'create result directory'
-  file:
-    path: /home/{{app_user}}/server/bench-results
+    - setup
+- name: Create result directory
+  ansible.builtin.file:
+    path: /home/{{ app_user }}/server/bench-results
     state: directory
-    owner: '{{app_user}}'
-    group: '{{app_user}}'
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
   tags:
-    - 'setup'
-- name: 'upload app config'
-  template:
+    - setup
+- name: Upload app config
+  ansible.builtin.template:
     src: 'config.json.j2'
-    dest: '/home/{{app_user}}/server/config.json'
-    owner: '{{app_user}}'
-    group: '{{app_user}}'
+    dest: /home/{{ app_user }}/server/config.json
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
   notify:
-    - 'start app'
-- name: 'upload systemd service file'
-  template:
-    src: 'ci-bench-runner.service'
-    dest: '/etc/systemd/system'
-    owner: 'root'
-    group: 'root'
+    - start app
+- name: Upload systemd service file
+  ansible.builtin.template:
+    src: ci-bench-runner.service
+    dest: /etc/systemd/system
+    owner: root
+    group: root
   notify:
-    - 'start app'
+    - start app

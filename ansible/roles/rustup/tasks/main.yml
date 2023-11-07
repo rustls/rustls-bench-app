@@ -1,16 +1,17 @@
-- name: 'upload rustup install script'
-  copy:
-    src: 'install.sh'
-    dest: '/home/{{app_user}}/rustup-install.sh'
-    mode: 'u=rwx,g=r,o=r'
-    owner: '{{app_user}}'
-    group: '{{app_user}}'
-- name: 'install rustup'
+---
+- name: Upload rustup install script
+  ansible.builtin.copy:
+    src: install.sh
+    dest: /home/{{ app_user }}/rustup-install.sh
+    mode: u=rwx,g=r,o=r
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+- name: Install rustup
   # Note: we have vendored the rustup install script
-  command: '/home/{{app_user}}/rustup-install.sh -y -q'
-  become_user: '{{app_user}}'
+  ansible.builtin.command: /home/{{app_user}}/rustup-install.sh -y -q
+  become_user: "{{app_user}}"
   args:
-    creates: '/home/{{app_user}}/.rustup'
-- name: 'update to latest stable'
-  become_user: '{{app_user}}'
-  command: '/home/{{app_user}}/.cargo/bin/rustup update'
+    creates: /home/{{ app_user }}/.rustup
+- name: Update to latest stable
+  become_user: "{{app_user}}"
+  ansible.builtin.command: /home/{{app_user}}/.cargo/bin/rustup update
