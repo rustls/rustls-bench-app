@@ -30,15 +30,7 @@
             inherit system;
             overlays = [ (import inputs.rust-overlay) ];
           };
-          packages.default = self'.packages.ci-bench-runner;
           devShells.default = self'.devShells.nightly;
-
-          packages.ci-bench-runner = pkgs.rustPlatform.buildRustPackage {
-            inherit (cargoToml.package) name version;
-            src = crateDir;
-            cargoLock = { lockFile = "${crateDir}/Cargo.lock"; };
-            doCheck = false; # Some tests require platform certs.
-          };
 
           # Nightly Rust dev env
           devShells.nightly = (mkDevShell (pkgs.rust-bin.selectLatestNightlyWith
