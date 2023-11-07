@@ -21,6 +21,7 @@
             pkgs.mkShell {
               shellHook = ''
                 export RUST_SRC_PATH=${pkgs.rustPlatform.rustLibSrc}
+                export LC_ALL="C.UTF-8"
               '';
               nativeBuildInputs = devDeps ++ [ rustc ];
             };
