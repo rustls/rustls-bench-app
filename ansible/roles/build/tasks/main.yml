@@ -5,6 +5,7 @@
   tags:
     - setup
 - name: Git checkout
+  become: true
   become_user: "{{ app_user }}"
   ansible.builtin.git:
     repo: "{{ bench_app_repo }}"
@@ -15,6 +16,7 @@
   tags:
     - setup
 - name: Build app
+  become: true
   become_user: "{{ app_user }}"
   ansible.builtin.command: /home/{{ app_user }}/.cargo/bin/cargo build --release
   changed_when: true

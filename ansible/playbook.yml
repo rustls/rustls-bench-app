@@ -1,6 +1,5 @@
 ---
 - hosts: all
-  become: true
   vars:
     hostname: rustls-perf.ochagavia.nl
     app_user: ci-bench-runner

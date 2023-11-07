@@ -9,10 +9,12 @@
 - name: Install rustup
   # Note: we have vendored the rustup install script
   ansible.builtin.command: /home/{{ app_user }}/rustup-install.sh -y -q
+  become: true
   become_user: "{{ app_user }}"
   args:
     creates: /home/{{ app_user }}/.rustup
 - name: Update to latest stable
+  become: true
   become_user: "{{ app_user }}"
   ansible.builtin.command: /home/{{ app_user }}/.cargo/bin/rustup update
   changed_when: true
