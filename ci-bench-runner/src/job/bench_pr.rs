@@ -63,8 +63,8 @@ pub async fn handle_issue_comment(ctx: JobContext<'_>) -> anyhow::Result<()> {
         trace!("ignoring event for `{}` action", payload.action);
         return Ok(());
     }
-    if payload.comment.user.login == "rustls-bench" {
-        trace!("ignoring comment from rustls-bench");
+    if payload.comment.user.id == ctx.config.github_app_id {
+        trace!("ignoring comment from ourselves");
         return Ok(());
     }
     if !ALLOWED_AUTHOR_ASSOCIATIONS.contains(&payload.comment.author_association.as_str()) {
@@ -426,18 +426,19 @@ fn calculate_significance_thresholds(historical_results: Vec<BenchResult>) -> Ha
     outlier_bounds
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PrBranches {
     pub baseline: CommitIdentifier,
     pub candidate: CommitIdentifier,
 }
 
+#[derive(Debug)]
 struct BenchPrError {
     error: anyhow::Error,
     logs: BenchPrLogs,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct BenchPrLogs {
     base: Vec<Log>,
     candidate: Vec<Log>,

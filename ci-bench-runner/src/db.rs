@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// An enqueued GitHub event
+#[derive(Debug)]
 pub struct QueuedEvent {
     /// An internal id for this event (i.e. not GitHub's)
     pub id: Uuid,
@@ -63,7 +64,7 @@ pub struct BenchJob {
 }
 
 /// A result for a specific benchmark scenario
-#[derive(sqlx::FromRow)]
+#[derive(Debug, sqlx::FromRow)]
 pub struct BenchResult {
     /// The scenario's name
     pub scenario_name: String,
@@ -75,6 +76,7 @@ pub struct BenchResult {
 }
 
 /// The results of a comparison between two branches of rustls
+#[derive(Debug)]
 pub struct ComparisonResult {
     /// The diffs, per scenario
     pub diffs: Vec<ScenarioDiff>,
@@ -123,7 +125,7 @@ impl TryFrom<i64> for ScenarioKind {
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(ScenarioKind::Icount),
+            0 => Ok(Self::Icount),
             kind => bail!("invalid scenario kind: {kind}"),
         }
     }

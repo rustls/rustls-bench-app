@@ -43,7 +43,7 @@ struct AppState {
 }
 
 /// The application's configuration
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
 pub struct AppConfig {
     /// Base URL used for the GitHub API (used to mock out the API in tests)
     pub github_api_url_override: Option<String>,
@@ -142,24 +142,24 @@ async fn get_cachegrind_diff(
 ) -> axum::response::Result<String> {
     // Extract commit hashes from URL
     let mut commit_parts = compared_commits.split(':');
-    let baseline_commit = commit_parts.next().ok_or("malformed URL")?;
-    let candidate_commit = commit_parts.next().ok_or("malformed URL")?;
-    if commit_parts.next().is_some() {
-        Err((StatusCode::BAD_REQUEST, "malformed URL"))?;
-    }
+    let (baseline_commit, candidate_commit) = match (
+        commit_parts.next(),
+        commit_parts.next(),
+        commit_parts.next(),
+    ) {
+        (Some(baseline), Some(candidate), None) => (baseline, candidate),
+        _ => Err((StatusCode::BAD_REQUEST, "malformed URL"))?,
+    };
 
-    let result = state
+    Ok(state
         .db
         .cachegrind_diff(baseline_commit, candidate_commit, &scenario_name)
         .await
-        .map_err(|_| "internal server error")?;
-
-    let result = result.ok_or((
-        StatusCode::NOT_FOUND,
-        "comparison not found for the provided commit hashes and scenario",
-    ))?;
-
-    Ok(result)
+        .map_err(|_| "internal server error")?
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            "comparison not found for the provided commit hashes and scenario",
+        ))?)
 }
 
 /// Handles an incoming GitHub webhook
@@ -181,7 +181,7 @@ async fn handle_github_webhook(
     };
 
     if !verify_webhook_signature(&body, signature, &state.config.webhook_secret) {
-        trace!("invalid signature, ignoring event");
+        trace!("{WEBHOOK_SIGNATURE_HEADER} invalid signature, ignoring event");
         return StatusCode::BAD_REQUEST;
     }
 
@@ -222,7 +222,7 @@ pub static WEBHOOK_SIGNATURE_HEADER: &str = "X-Hub-Signature-256";
 pub static WEBHOOK_EVENT_HEADER: &str = "X-GitHub-Event";
 
 /// Identifies a specific commit in a repository
-#[derive(Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CommitIdentifier {
     /// The URL at which the repository can be cloned
     pub clone_url: String,

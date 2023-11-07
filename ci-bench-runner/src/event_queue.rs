@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -41,9 +42,8 @@ impl EventQueue {
     ) -> Self {
         let (worker_tx, event_enqueued_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let active_job_id = Arc::new(Mutex::new(None));
         let queue = Self {
-            active_job_id,
+            active_job_id: Arc::new(Mutex::new(None)),
             event_enqueued_tx: worker_tx,
             db,
         };
@@ -53,18 +53,17 @@ impl EventQueue {
             config,
             bench_runner,
             octocrab,
-        );
-        queue
+        )
     }
 
     /// Starts and supervises the background queue processing task
     fn start_and_supervise_queue_processing(
-        &self,
+        self,
         event_enqueued_rx: UnboundedReceiver<()>,
         config: Arc<AppConfig>,
         bench_runner: Arc<dyn BenchRunner>,
         octocrab: CachedOctocrab,
-    ) {
+    ) -> Self {
         let active_job_id = self.active_job_id.clone();
         let queue = self.clone();
         let event_enqueued_rx = Arc::new(tokio::sync::Mutex::new(event_enqueued_rx));
@@ -77,7 +76,7 @@ impl EventQueue {
                     octocrab.clone(),
                 );
 
-                info!("background task started for event queue");
+                info!("background task started for event queue job {active_job_id:?}");
                 match background_task.await {
                     Ok(Ok(_)) => {
                         // The task finished normally, no need to restart it
@@ -87,14 +86,14 @@ impl EventQueue {
                         // The task finished with an error
                         error!(
                             cause = e.to_string(),
-                            "job queue background task errored, restarting in 1s"
+                            "job queue background task {active_job_id:?} errored, restarting in 1s"
                         );
                     }
                     Err(e) => {
                         // The task panicked or was cancelled
                         error!(
                             cause = e.to_string(),
-                            "job queue background task crashed, restarting in 1s"
+                            "job queue background task {active_job_id:?} crashed, restarting in 1s"
                         );
                     }
                 }
@@ -103,6 +102,8 @@ impl EventQueue {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         });
+
+        self
     }
 
     /// Spawns a tokio task to process queued events in the background.
@@ -236,16 +237,14 @@ pub enum AllowedEvent {
 }
 
 impl AllowedEvent {
-    fn from_event_string(event: &str) -> Option<AllowedEvent> {
-        let kind = match event {
-            "issue_comment" => AllowedEvent::IssueComment,
-            "push" => AllowedEvent::Push,
-            "pull_request" => AllowedEvent::PullRequest,
-            "pull_request_review" => AllowedEvent::PullRequestReview,
+    fn from_event_string(event: &str) -> Option<Self> {
+        Some(match event {
+            "issue_comment" => Self::IssueComment,
+            "push" => Self::Push,
+            "pull_request" => Self::PullRequest,
+            "pull_request_review" => Self::PullRequestReview,
             _ => return None,
-        };
-
-        Some(kind)
+        })
     }
 }
 
@@ -266,7 +265,17 @@ pub struct JobContext<'a> {
     pub db: Db,
 }
 
-#[derive(Serialize, Deserialize)]
+impl<'a> Debug for JobContext<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JobContext")
+            .field("event", &self.event)
+            .field("job_id", &self.job_id)
+            .field("job_output_dir", &self.job_output_dir)
+            .finish()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct JobView {
     #[serde(with = "time::serde::rfc3339")]
     pub created_utc: OffsetDateTime,

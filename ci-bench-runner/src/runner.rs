@@ -21,6 +21,7 @@ pub trait BenchRunner: Send + Sync {
 }
 
 /// A bench runner that runs benchmarks locally
+#[derive(Debug)]
 pub struct LocalBenchRunner;
 
 impl BenchRunner for LocalBenchRunner {
@@ -161,6 +162,7 @@ fn run_command(mut command: Command, logs: &mut Vec<Log>) -> anyhow::Result<()> 
 }
 
 /// Logs for a specific command
+#[derive(Debug)]
 pub struct Log {
     /// The command in question
     pub command: String,
@@ -178,15 +180,11 @@ pub fn write_logs_for_run(s: &mut String, logs: &[Log]) {
     }
 
     for log in logs {
-        write_log(s, log);
+        write_log_part(s, "command", &log.command);
+        write_log_part(s, "cwd", &log.cwd);
+        write_log_part(s, "stdout", &String::from_utf8_lossy(&log.stdout));
+        write_log_part(s, "stderr", &String::from_utf8_lossy(&log.stderr));
     }
-}
-
-fn write_log(s: &mut String, log: &Log) {
-    write_log_part(s, "command", &log.command);
-    write_log_part(s, "cwd", &log.cwd);
-    write_log_part(s, "stdout", &String::from_utf8_lossy(&log.stdout));
-    write_log_part(s, "stderr", &String::from_utf8_lossy(&log.stderr));
 }
 
 fn write_log_part(s: &mut String, part_name: &str, part: &str) {

@@ -6,7 +6,6 @@ use hmac::{Hmac, Mac};
 use jsonwebtoken::EncodingKey;
 use octocrab::models::{InstallationId, StatusState};
 use octocrab::Octocrab;
-use sha2::digest::FixedOutput;
 use sha2::Sha256;
 use tracing::{error, trace, warn};
 
@@ -19,21 +18,21 @@ pub mod api {
     use octocrab::models::pulls::PullRequest;
     use serde::Deserialize;
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, PartialEq, Deserialize)]
     pub struct PullRequestReviewEvent {
         pub action: String,
         pub review: Review,
         pub pull_request: PullRequest,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct Review {
         pub author_association: String,
         pub state: String,
         pub commit_id: String,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct PushEvent {
         #[serde(rename = "ref")]
         pub git_ref: String,
@@ -42,44 +41,45 @@ pub mod api {
         pub deleted: bool,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct CommentEvent {
         pub action: String,
         pub comment: Comment,
         pub issue: Issue,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct Comment {
         pub author_association: String,
         pub body: String,
         pub user: GitHubUser,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct Issue {
         pub number: u64,
         pub pull_request: Option<PullRequestLite>,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct PullRequestLite {
         pub url: String,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct GitHubUser {
         pub login: String,
+        pub id: u64,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
     pub struct Repo {
         pub clone_url: String,
     }
 }
 
 /// Provides access to an authenticated `Octocrab` client
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct CachedOctocrab {
     /// Initial GitHub client, authenticated as our GitHub App
     app_client: Octocrab,
@@ -210,15 +210,8 @@ pub fn verify_webhook_signature(body: &[u8], signature: &str, secret: &str) -> b
 
     // Safe to unwrap because any key is valid
     let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
-
     mac.update(body);
-    let output = mac.finalize_fixed();
-    trace!(
-        "verifying webhook signature; provided = {signature}; computed = {:?}",
-        hex::encode(output.as_slice())
-    );
-
-    signature_bytes == output.as_slice()
+    mac.verify_slice(signature_bytes.as_slice()).is_ok()
 }
 
 #[cfg(test)]

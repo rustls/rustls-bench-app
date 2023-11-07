@@ -15,7 +15,7 @@
           cargoToml =
             builtins.fromTOML (builtins.readFile "${crateDir}/Cargo.toml");
 
-          devDeps = with pkgs; [ ansible ansible-lint ];
+          devDeps = with pkgs; [ ansible ansible-lint valgrind ];
 
           mkDevShell = rustc:
             pkgs.mkShell {
@@ -35,9 +35,7 @@
           packages.ci-bench-runner = pkgs.rustPlatform.buildRustPackage {
             inherit (cargoToml.package) name version;
             src = crateDir;
-            cargoLock = {
-              lockFile = "${crateDir}/Cargo.lock";
-            };
+            cargoLock = { lockFile = "${crateDir}/Cargo.lock"; };
             doCheck = false; # Some tests require platform certs.
           };
 
