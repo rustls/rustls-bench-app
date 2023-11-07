@@ -5,7 +5,7 @@
   tags:
     - setup
 - name: Git checkout
-  become_user: "{{app_user}}"
+  become_user: "{{ app_user }}"
   ansible.builtin.git:
     repo: "{{ bench_app_repo }}"
     dest: /home/{{ app_user }}/rustls-bench-app
@@ -15,8 +15,8 @@
   tags:
     - setup
 - name: Build app
-  become_user: "{{app_user}}"
-  ansible.builtin.command: /home/{{app_user}}/.cargo/bin/cargo build --release
+  become_user: "{{ app_user }}"
+  ansible.builtin.command: /home/{{ app_user }}/.cargo/bin/cargo build --release
   args:
     chdir: /home/{{ app_user }}/rustls-bench-app/ci-bench-runner
     # Note: omitting a 'creates' here - we want to build fresh even if the binary exists
