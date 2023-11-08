@@ -1,0 +1,4 @@
+# This file contains ignores rule violations for ansible-lint
+playbook.yml name[play]
+secrets.example.yml yaml[line-length]
+secrets.yml yaml[line-length]

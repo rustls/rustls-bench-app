@@ -31,7 +31,7 @@ will need to:
 1. Replace the placeholder secret values by real ones.
 
 Secrets will be injected in the Rust app configuration file, which can be found at
-[`roles/bench-app-service/templates/config.json.j2`](roles/bench-app-service/templates/config.json.j2).
+[`roles/bench_app_service/templates/config.json.j2`](roles/bench_app_service/templates/config.json.j2).
 If you are deploying the  app for testing purposes, you will probably need to override some
 variables like `github_app_id`, `github_repo_owner` and `github_repo_name` to match yours. See the
 [testing](#testing) section for more information.

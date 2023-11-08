@@ -1,0 +1,49 @@
+---
+- name: Install valgrind
+  ansible.builtin.apt:
+    name: valgrind
+- name: Create app directory
+  ansible.builtin.file:
+    path: /home/{{ app_user }}/server
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: u=rwx,g=r,o=r
+  tags:
+    - setup
+- name: Create PR build log directory
+  ansible.builtin.file:
+    path: /home/{{ app_user }}/server/job-output
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: u=rwx,g=r,o=r
+  tags:
+    - setup
+- name: Create result directory
+  ansible.builtin.file:
+    path: /home/{{ app_user }}/server/bench-results
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: u=rwx,g=r,o=r
+  tags:
+    - setup
+- name: Upload app config
+  ansible.builtin.template:
+    src: 'config.json.j2'
+    dest: /home/{{ app_user }}/server/config.json
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: u=rw
+  notify:
+    - start app
+- name: Upload systemd service file
+  ansible.builtin.template:
+    src: ci-bench-runner.service
+    dest: /etc/systemd/system
+    owner: root
+    group: root
+    mode: u=rw,g=r,o=r
+  notify:
+    - start app
