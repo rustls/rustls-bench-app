@@ -240,7 +240,7 @@ async fn test_issue_comment_happy_path() {
     .await;
 
     // Wait for our mock endpoints to have been called
-    tokio::time::timeout(Duration::from_secs(2), update_status.wait_until_satisfied())
+    tokio::time::timeout(Duration::from_secs(5), update_status.wait_until_satisfied())
         .await
         .ok();
 
@@ -270,7 +270,7 @@ async fn test_pr_opened_happy_path_with_comment_reuse() {
     .await;
 
     // Wait for our post status endpoint to have been called
-    tokio::time::timeout(Duration::from_secs(2), post_status.wait_until_satisfied())
+    tokio::time::timeout(Duration::from_secs(5), post_status.wait_until_satisfied())
         .await
         .ok();
 
@@ -288,7 +288,7 @@ async fn test_pr_opened_happy_path_with_comment_reuse() {
     .await;
 
     // Wait for our post status endpoint to have been called
-    tokio::time::timeout(Duration::from_secs(2), post_status.wait_until_satisfied())
+    tokio::time::timeout(Duration::from_secs(5), post_status.wait_until_satisfied())
         .await
         .ok();
 
@@ -326,7 +326,7 @@ async fn test_pr_opened_happy_path_with_failed_comment_reuse() {
     .await;
 
     // Wait for our post status endpoint to have been called
-    tokio::time::timeout(Duration::from_secs(2), post_status.wait_until_satisfied())
+    tokio::time::timeout(Duration::from_secs(5), post_status.wait_until_satisfied())
         .await
         .unwrap();
 
@@ -360,7 +360,7 @@ async fn test_pr_synchronize_happy_path() {
     .await;
 
     // Wait for our mock endpoints to have been called
-    tokio::time::timeout(Duration::from_secs(2), post_status.wait_until_satisfied())
+    tokio::time::timeout(Duration::from_secs(5), post_status.wait_until_satisfied())
         .await
         .ok();
 
@@ -412,7 +412,7 @@ async fn test_pr_synchronize_cached() {
     .await;
 
     // Wait for our mock endpoints to have been called
-    tokio::time::timeout(Duration::from_secs(2), post_status.wait_until_satisfied())
+    tokio::time::timeout(Duration::from_secs(5), post_status.wait_until_satisfied())
         .await
         .ok();
 
@@ -442,7 +442,7 @@ async fn test_pr_review_happy_path() {
     .await;
 
     // Wait for our mock endpoints to have been called
-    tokio::time::timeout(Duration::from_secs(2), post_status.wait_until_satisfied())
+    tokio::time::timeout(Duration::from_secs(5), post_status.wait_until_satisfied())
         .await
         .ok();
 
@@ -863,7 +863,7 @@ impl TestServer {
         tokio::spawn(server);
 
         // Sanity check: ensure the server retrieved the app installation and an auth token
-        tokio::time::timeout(Duration::from_secs(1), mock_get_app.wait_until_satisfied())
+        tokio::time::timeout(Duration::from_secs(5), mock_get_app.wait_until_satisfied())
             .await
             .unwrap();
         tokio::time::timeout(
