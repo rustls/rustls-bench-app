@@ -8,6 +8,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, bail, Context};
+use askama::Template;
 use octocrab::models::pulls::PullRequest;
 use octocrab::models::webhook_events::payload::PullRequestWebhookEventAction;
 use octocrab::models::webhook_events::{WebhookEvent, WebhookEventPayload};
@@ -456,54 +457,35 @@ fn markdown_comment(
     diff_url: &str,
     bencher_project_id: Option<&str>,
 ) -> String {
-    fn write_checkout_details(s: &mut String, branches: &PrBranches) {
-        writeln!(s, "Checkout details:").ok();
-        writeln!(s, "- Base repo: {}", branches.baseline.clone_url).ok();
-        writeln!(
-            s,
-            "- Base branch: {} ({})",
-            branches.baseline.branch_name, branches.baseline.commit_sha,
-        )
-        .ok();
-        writeln!(s, "- Candidate repo: {}", branches.candidate.clone_url).ok();
-        writeln!(
-            s,
-            "- Candidate branch: {} ({})",
-            branches.candidate.branch_name, branches.candidate.commit_sha,
-        )
-        .ok();
-    }
-
-    let mut s = String::new();
     match result {
         Ok(bench_results) => {
-            s = print_report(bench_results, diff_url);
-            writeln!(s, "## Additional information").ok();
-
-            if let Some(project_id) = bencher_project_id {
-                writeln!(
-                    s,
-                    "\n[Historical results](https://bencher.dev/perf/{project_id})\n"
-                )
-                .ok();
+            let (significant, negligible) = split_on_threshold(bench_results.diffs);
+            ComparisonSuccessComment {
+                cachegrind_diff_url: diff_url,
+                significant_icount_diffs: significant,
+                negligible_icount_diffs: negligible,
+                scenarios_missing_in_baseline: bench_results.scenarios_missing_in_baseline,
+                branches,
+                bencher_project_id,
             }
-
-            write_checkout_details(&mut s, branches);
+            .render()
+            .expect("failed to render askama template")
         }
         Err(error) => {
-            writeln!(s, "# Error running benchmarks").ok();
-            writeln!(s, "Cause:").ok();
-            writeln!(s, "```\n{:?}\n```", error.error).ok();
-            write_checkout_details(&mut s, branches);
-            writeln!(s, "## Logs").ok();
-            writeln!(s, "### Candidate").ok();
-            write_logs_for_run(&mut s, &error.logs.candidate);
-            writeln!(s, "### Base").ok();
-            write_logs_for_run(&mut s, &error.logs.base);
+            let mut baseline_logs = String::new();
+            write_logs_for_run(&mut baseline_logs, &error.logs.base);
+            let mut candidate_logs = String::new();
+            write_logs_for_run(&mut candidate_logs, &error.logs.candidate);
+            ComparisonErrorComment {
+                error: format!("{:?}", error.error),
+                baseline_logs,
+                candidate_logs,
+                branches,
+            }
+            .render()
+            .expect("failed to render askama template")
         }
     }
-
-    s
 }
 
 /// Returns an internal representation of the comparison between the baseline and the candidate
@@ -540,47 +522,6 @@ fn compare_results(
     Ok((diffs, missing))
 }
 
-/// Prints a report of the comparison to stdout, using GitHub-flavored markdown
-fn print_report(result: ComparisonResult, cachegrind_diff_url: &str) -> String {
-    let (significant, negligible) = split_on_threshold(result.diffs);
-
-    let mut s = String::new();
-    writeln!(s, "# Benchmark results").ok();
-
-    if !result.scenarios_missing_in_baseline.is_empty() {
-        writeln!(s, "### ⚠️ Warning: missing benchmarks").ok();
-        writeln!(s,).ok();
-        writeln!(s, "The following benchmark scenarios are present in the candidate but not in the baseline:").ok();
-        writeln!(s,).ok();
-        for scenario in &result.scenarios_missing_in_baseline {
-            writeln!(s, "* {scenario}").ok();
-        }
-    }
-
-    writeln!(s, "## Significant instruction count differences").ok();
-    if significant.is_empty() {
-        writeln!(
-            s,
-            "_There are no significant instruction count differences_",
-        )
-        .ok();
-    } else {
-        table(&mut s, &significant, cachegrind_diff_url, true);
-    }
-
-    writeln!(s, "## Other instruction count differences").ok();
-    if negligible.is_empty() {
-        writeln!(s, "_There are no other instruction count differences_").ok();
-    } else {
-        writeln!(s, "<details>").ok();
-        writeln!(s, "<summary>Click to expand</summary>\n").ok();
-        table(&mut s, &negligible, cachegrind_diff_url, false);
-        writeln!(s, "</details>\n").ok();
-    }
-
-    s
-}
-
 /// Splits the diffs into two `Vec`s, the first one containing the diffs that exceed the threshold,
 /// the second one containing the rest
 fn split_on_threshold(diffs: Vec<ScenarioDiff>) -> (Vec<ScenarioDiff>, Vec<ScenarioDiff>) {
@@ -603,33 +544,6 @@ fn split_on_threshold(diffs: Vec<ScenarioDiff>) -> (Vec<ScenarioDiff>, Vec<Scena
     });
 
     (significant, negligible)
-}
-
-/// Renders the diffs as a markdown table
-fn table(s: &mut String, diffs: &[ScenarioDiff], cachegrind_diff_url: &str, emoji_feedback: bool) {
-    writeln!(s, "| Scenario | Baseline | Candidate | Diff | Threshold |").ok();
-    writeln!(s, "| --- | ---: | ---: | ---: | ---: |").ok();
-    for diff in diffs {
-        let emoji = match emoji_feedback {
-            true if diff.diff() > 0.0 => "⚠️ ",
-            true if diff.diff() < 0.0 => "✅ ",
-            _ => "",
-        };
-
-        let cachegrind_diff_url = format!("{cachegrind_diff_url}/{}", diff.scenario_name);
-
-        writeln!(
-            s,
-            "| {} | {} | {} | {emoji}[{}]({cachegrind_diff_url}) ({:.2}%) | {:.2}% |",
-            diff.scenario_name,
-            diff.baseline_result,
-            diff.candidate_result,
-            diff.diff(),
-            diff.diff_ratio() * 100.0,
-            diff.significance_threshold * 100.0
-        )
-        .ok();
-    }
 }
 
 /// Returns the detailed instruction diff between the baseline and the candidate
@@ -693,6 +607,36 @@ pub fn cachegrind_diff(job_output_path: &Path, scenario: &str) -> anyhow::Result
     }
 
     Ok(stdout)
+}
+
+#[derive(Template)]
+#[template(path = "comparison_success_comment.md")]
+pub struct ComparisonSuccessComment<'a> {
+    /// Significant icount diffs, per scenario
+    significant_icount_diffs: Vec<ScenarioDiff>,
+    /// Negligible icount diffs, per scenario
+    negligible_icount_diffs: Vec<ScenarioDiff>,
+    /// Benchmark scenarios present in the candidate but missing in the baseline
+    scenarios_missing_in_baseline: Vec<String>,
+    /// The base url to obtain cachegrind diffs
+    cachegrind_diff_url: &'a str,
+    /// Information about the branches that were compared
+    branches: &'a PrBranches,
+    /// Bencher's project id, if available
+    bencher_project_id: Option<&'a str>,
+}
+
+#[derive(Template)]
+#[template(path = "comparison_error_comment.md")]
+pub struct ComparisonErrorComment<'a> {
+    /// The error that caused the comparison to fail
+    error: String,
+    /// Information about the branches that were compared
+    branches: &'a PrBranches,
+    /// Logs from trying to benchmark the candidate branch
+    candidate_logs: String,
+    /// Logs from trying to benchmark the baseline branch
+    baseline_logs: String,
 }
 
 static DEFAULT_NOISE_THRESHOLD: f64 = 0.002;
