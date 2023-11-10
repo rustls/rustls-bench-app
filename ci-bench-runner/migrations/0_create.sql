@@ -17,7 +17,8 @@ CREATE TABLE comparison_runs(
     created_utc TEXT NOT NULL,
     baseline_commit TEXT NOT NULL,
     candidate_commit TEXT NOT NULL,
-    scenarios_missing_in_baseline TEXT
+    icount_scenarios_missing_in_baseline TEXT,
+    walltime_scenarios_missing_in_baseline TEXT
 ) STRICT;
 
 CREATE INDEX idx_comparison_run_commits ON comparison_runs(baseline_commit, candidate_commit);

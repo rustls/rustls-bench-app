@@ -21,9 +21,9 @@ use uuid::Uuid;
 use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, MockGuard, MockServer, ResponseTemplate};
 
-use crate::db::{ScenarioDiff, ScenarioKind};
+use crate::db::{ComparisonResult, ComparisonSubResult, ScenarioDiff, ScenarioKind};
 use crate::event_queue::{JobStatus, JobView};
-use crate::runner::{BenchRunner, Log};
+use crate::runner::{BenchRunner, Log, OptionalBenchmarksFound};
 use crate::{
     server, AppConfig, CommitIdentifier, Db, WEBHOOK_EVENT_HEADER, WEBHOOK_SIGNATURE_HEADER,
 };
@@ -82,6 +82,10 @@ mod cachegrind {
     pub static SAMPLE_OUTPUT: &str = include_str!("data/cachegrind_outputs/sample");
 }
 
+pub mod criterion {
+    pub static SAMPLE_ESTIMATES: &str = include_str!("data/criterion_outputs/estimates.json");
+}
+
 struct MockBenchRunner {
     config: std::sync::Mutex<MockBenchRunnerConfig>,
     runs_tx: UnboundedSender<MockBenchRun>,
@@ -116,7 +120,7 @@ impl BenchRunner for MockBenchRunner {
         _: &Path,
         job_output_dir: &Path,
         _: &mut Vec<Log>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<OptionalBenchmarksFound> {
         if self.config.lock().unwrap().crash {
             bail!("bench runner crashed :O");
         }
@@ -128,15 +132,27 @@ impl BenchRunner for MockBenchRunner {
 
         // Store fake results for the comparison, including cachegrind raw files
         let results_dir = job_output_dir.join("results");
-        let cachegrind_dir = results_dir.join("cachegrind");
         fs::create_dir_all(&results_dir)?;
-        fs::create_dir(&cachegrind_dir)?;
+
+        // Fake icounts
         fs::write(results_dir.join("icounts.csv"), "fake_bench,12345")?;
+
+        // Fake cachegrind files
+        let cachegrind_dir = results_dir.join("cachegrind");
+        fs::create_dir(&cachegrind_dir)?;
         fs::write(
             cachegrind_dir.join("calibration"),
             cachegrind::SAMPLE_OUTPUT,
         )?;
         fs::write(cachegrind_dir.join("fake_bench"), cachegrind::SAMPLE_OUTPUT)?;
+
+        // Fake criterion files
+        let criterion_dir = results_dir.join("criterion/fake_criterion_bench/base");
+        fs::create_dir_all(&criterion_dir)?;
+        fs::write(
+            criterion_dir.join("estimates.json"),
+            criterion::SAMPLE_ESTIMATES,
+        )?;
 
         // Notify any watchers of this call
         self.runs_tx
@@ -144,7 +160,8 @@ impl BenchRunner for MockBenchRunner {
                 commit: commit.clone(),
             })
             .unwrap();
-        Ok(())
+
+        Ok(OptionalBenchmarksFound { walltime: true })
     }
 }
 
@@ -384,15 +401,23 @@ async fn test_pr_synchronize_cached() {
         .store_comparison_result(
             "7edbfb999b352aa09fe669e9103d8155d7e7d890".to_string(),
             "b0b69e925b2c9c6187cb16f361dd36e156f8e097".to_string(),
-            Vec::new(),
-            vec![ScenarioDiff {
-                scenario_name: "foo".to_string(),
-                scenario_kind: ScenarioKind::Icount,
-                baseline_result: 1000.0,
-                candidate_result: 1001.0,
-                significance_threshold: 0.35,
-                cachegrind_diff: "dummy cachegrind diff".to_string(),
-            }],
+            ComparisonResult {
+                icount: ComparisonSubResult {
+                    scenarios_missing_in_baseline: Vec::new(),
+                    diffs: vec![ScenarioDiff {
+                        scenario_name: "foo".to_string(),
+                        scenario_kind: ScenarioKind::Icount,
+                        baseline_result: 1000.0,
+                        candidate_result: 1001.0,
+                        significance_threshold: 0.35,
+                        cachegrind_diff: "dummy cachegrind diff".to_string(),
+                    }],
+                },
+                walltime: ComparisonSubResult {
+                    scenarios_missing_in_baseline: vec!["bar".to_string()],
+                    diffs: Vec::new(),
+                },
+            },
         )
         .await
         .unwrap();
@@ -543,7 +568,7 @@ async fn test_push_happy_path() {
         .await
         .unwrap()
         .len();
-    assert_eq!(result_count, 2);
+    assert_eq!(result_count, 4);
 }
 
 #[tokio::test]
@@ -557,15 +582,23 @@ async fn test_get_cachegrind_diff() {
         .store_comparison_result(
             "7edbfb999b352aa09fe669e9103d8155d7e7d890".to_string(),
             "b0b69e925b2c9c6187cb16f361dd36e156f8e097".to_string(),
-            Vec::new(),
-            vec![ScenarioDiff {
-                scenario_name: "foo".to_string(),
-                scenario_kind: ScenarioKind::Icount,
-                baseline_result: 1000.0,
-                candidate_result: 1001.0,
-                significance_threshold: 0.35,
-                cachegrind_diff: "dummy cachegrind diff".to_string(),
-            }],
+            ComparisonResult {
+                icount: ComparisonSubResult {
+                    scenarios_missing_in_baseline: Vec::new(),
+                    diffs: vec![ScenarioDiff {
+                        scenario_name: "foo".to_string(),
+                        scenario_kind: ScenarioKind::Icount,
+                        baseline_result: 1000.0,
+                        candidate_result: 1001.0,
+                        significance_threshold: 0.35,
+                        cachegrind_diff: "dummy cachegrind diff".to_string(),
+                    }],
+                },
+                walltime: ComparisonSubResult {
+                    scenarios_missing_in_baseline: vec!["bar".to_string()],
+                    diffs: Vec::new(),
+                },
+            },
         )
         .await
         .unwrap();
@@ -787,9 +820,7 @@ impl MockGitHub {
                 r"/repos/{}/issues/\d+/comments",
                 Self::repo_path()
             )))
-            .and(body_string_contains(
-                "Significant instruction count differences",
-            ))
+            .and(body_string_contains("# Benchmark results"))
             .respond_with(ResponseTemplate::new(201).set_body_string(api::CREATE_COMMENT))
             .expect(1)
             .named("post_comment");
@@ -803,9 +834,7 @@ impl MockGitHub {
                 r"/repos/{}/issues/comments/\d+",
                 Self::repo_path()
             )))
-            .and(body_string_contains(
-                "Significant instruction count differences",
-            ))
+            .and(body_string_contains("# Benchmark results"))
             .respond_with(ResponseTemplate::new(201).set_body_string(api::CREATE_COMMENT))
             .expect(1)
             .named("update_comment");

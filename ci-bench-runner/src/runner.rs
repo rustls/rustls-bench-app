@@ -17,7 +17,13 @@ pub trait BenchRunner: Send + Sync {
         checkout_target_dir: &Path,
         job_output_dir: &Path,
         command_logs: &mut Vec<Log>,
-    ) -> anyhow::Result<()>;
+    ) -> anyhow::Result<OptionalBenchmarksFound>;
+}
+
+/// Contains information about optional benchmarks that were found in the rustls check out
+pub struct OptionalBenchmarksFound {
+    /// Whether wall-time benchmarks were found
+    pub walltime: bool,
 }
 
 /// A bench runner that runs benchmarks locally
@@ -31,7 +37,7 @@ impl BenchRunner for LocalBenchRunner {
         checkout_target_dir: &Path,
         job_output_dir: &Path,
         command_logs: &mut Vec<Log>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<OptionalBenchmarksFound> {
         trace!(
             "checking out {} at commit {}",
             commit.clone_url,
@@ -81,7 +87,7 @@ impl BenchRunner for LocalBenchRunner {
 
         // Build benchmarks
         let bench_path = checkout_target_dir.join("ci-bench");
-        trace!("building ci benchmarks");
+        trace!("building icount benchmarks");
 
         let start = Instant::now();
         let mut command = Command::new("cargo");
@@ -94,11 +100,11 @@ impl BenchRunner for LocalBenchRunner {
         run_command(command, command_logs)?;
 
         trace!(
-            "benchmarks built in {:.2} s",
+            "icount benchmarks built in {:.2} s",
             (Instant::now() - start).as_secs_f64()
         );
 
-        // Run benchmarks
+        // Run icount benchmarks
         let bench_exe_path = checkout_target_dir.join("target/release/rustls-ci-bench");
         fs::create_dir_all(job_output_dir).context("Unable to create dir for job output")?;
 
@@ -113,11 +119,38 @@ impl BenchRunner for LocalBenchRunner {
         run_command(command, command_logs)?;
 
         trace!(
-            "benchmarks run in {:.2}",
+            "icount benchmarks run in {:.2} s",
             (Instant::now() - start).as_secs_f64()
         );
 
-        Ok(())
+        // Run walltime benchmarks
+        let has_walltime_benches = bench_path.join("benches").exists();
+        if has_walltime_benches {
+            trace!("building and running walltime benchmarks");
+            let start = Instant::now();
+
+            let mut command = Command::new("cargo");
+            command
+                .arg("bench")
+                .arg("--locked")
+                .current_dir(&bench_path);
+
+            run_command(command, command_logs)?;
+
+            trace!(
+                "walltime benchmarks run in {:.2} s",
+                (Instant::now() - start).as_secs_f64()
+            );
+
+            // Keep results around
+            let criterion_output = checkout_target_dir.join("target/criterion");
+            let dest = job_output_dir.join("results/criterion");
+            copy_dir(&criterion_output, &dest).context("failed to copy criterion results")?;
+        }
+
+        Ok(OptionalBenchmarksFound {
+            walltime: has_walltime_benches,
+        })
     }
 }
 
@@ -156,6 +189,21 @@ fn run_command(mut command: Command, logs: &mut Vec<Log>) -> anyhow::Result<()> 
             "`{command_str}` exited with exit status {:?}",
             output.status.code()
         );
+    }
+
+    Ok(())
+}
+
+/// Recursively copies a directory from the source to the destination path
+fn copy_dir(source: &Path, dest: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(dest)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &dest.join(entry.file_name()))?;
+        } else {
+            fs::copy(entry.path(), dest.join(entry.file_name()))?;
+        }
     }
 
     Ok(())
