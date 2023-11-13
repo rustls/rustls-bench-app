@@ -6,6 +6,8 @@
   ansible.builtin.apt:
     name: cmake
 - name: Create app directory
+  become: true
+  become_user: "{{ app_user }}"
   ansible.builtin.file:
     path: /home/{{ app_user }}/server
     state: directory
@@ -15,6 +17,8 @@
   tags:
     - setup
 - name: Create PR build log directory
+  become: true
+  become_user: "{{ app_user }}"
   ansible.builtin.file:
     path: /home/{{ app_user }}/server/job-output
     state: directory
@@ -24,6 +28,8 @@
   tags:
     - setup
 - name: Create result directory
+  become: true
+  become_user: "{{ app_user }}"
   ansible.builtin.file:
     path: /home/{{ app_user }}/server/bench-results
     state: directory
@@ -33,6 +39,8 @@
   tags:
     - setup
 - name: Upload app config
+  become: true
+  become_user: "{{ app_user }}"
   ansible.builtin.template:
     src: 'config.json.j2'
     dest: /home/{{ app_user }}/server/config.json
