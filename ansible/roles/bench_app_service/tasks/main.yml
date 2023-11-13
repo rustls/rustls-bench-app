@@ -2,6 +2,9 @@
 - name: Install valgrind
   ansible.builtin.apt:
     name: valgrind
+- name: Install cmake
+  ansible.builtin.apt:
+    name: cmake
 - name: Create app directory
   ansible.builtin.file:
     path: /home/{{ app_user }}/server
