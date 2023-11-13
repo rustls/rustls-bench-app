@@ -48,7 +48,7 @@
     group: "{{ app_user }}"
     mode: u=rw
   notify:
-    - start app
+    - Start app
 - name: Upload systemd service file
   ansible.builtin.template:
     src: ci-bench-runner.service
@@ -57,4 +57,4 @@
     group: root
     mode: u=rw,g=r,o=r
   notify:
-    - start app
+    - Start app
