@@ -84,7 +84,7 @@ ansible-playbook \
   --user root \
   --extra-vars 'hostname=rustls-bench.example.com' \
   --extra-vars 'github_repo_owner=example' \
-  --extra_vars 'github_repo_name=rustls' \
+  --extra-vars 'github_repo_name=rustls' \
   --extra-vars 'bench_app_repo=https://github.com/example/rustls-bench-app/' \
   --extra-vars 'bench_app_branch=example-branch' \
   playbook.yml

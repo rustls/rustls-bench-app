@@ -27,6 +27,8 @@
   tags:
     - setup
 - name: Copy release build
+  become: true
+  become_user: "{{ app_user }}"
   ansible.builtin.copy:
     src: /home/{{ app_user }}/rustls-bench-app/ci-bench-runner/target/release/ci-bench-runner
     remote_src: true
@@ -37,4 +39,4 @@
   tags:
     - setup
   notify:
-    - start app
+    - Start app

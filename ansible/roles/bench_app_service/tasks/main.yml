@@ -2,7 +2,12 @@
 - name: Install valgrind
   ansible.builtin.apt:
     name: valgrind
+- name: Install cmake
+  ansible.builtin.apt:
+    name: cmake
 - name: Create app directory
+  become: true
+  become_user: "{{ app_user }}"
   ansible.builtin.file:
     path: /home/{{ app_user }}/server
     state: directory
@@ -12,6 +17,8 @@
   tags:
     - setup
 - name: Create PR build log directory
+  become: true
+  become_user: "{{ app_user }}"
   ansible.builtin.file:
     path: /home/{{ app_user }}/server/job-output
     state: directory
@@ -21,6 +28,8 @@
   tags:
     - setup
 - name: Create result directory
+  become: true
+  become_user: "{{ app_user }}"
   ansible.builtin.file:
     path: /home/{{ app_user }}/server/bench-results
     state: directory
@@ -30,6 +39,8 @@
   tags:
     - setup
 - name: Upload app config
+  become: true
+  become_user: "{{ app_user }}"
   ansible.builtin.template:
     src: 'config.json.j2'
     dest: /home/{{ app_user }}/server/config.json
@@ -37,7 +48,7 @@
     group: "{{ app_user }}"
     mode: u=rw
   notify:
-    - start app
+    - Start app
 - name: Upload systemd service file
   ansible.builtin.template:
     src: ci-bench-runner.service
@@ -46,4 +57,4 @@
     group: root
     mode: u=rw,g=r,o=r
   notify:
-    - start app
+    - Start app
