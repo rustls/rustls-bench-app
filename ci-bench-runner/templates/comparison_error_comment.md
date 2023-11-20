@@ -1,6 +1,6 @@
 {% import "macros.md" as macros %}
 
-# Error running benchmarks"
+# Error running benchmarks
 
 Cause:
 
