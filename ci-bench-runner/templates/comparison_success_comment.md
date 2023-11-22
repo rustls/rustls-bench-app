@@ -2,33 +2,32 @@
 
 # Benchmark results
 
-{% if scenarios_missing_in_baseline.len() > 0 %}
+## Instruction counts
 
-### ⚠️ Warning: missing benchmarks
+{% call macros::missing_scenarios(icount.scenarios_missing_in_baseline) %}
 
-The following benchmark scenarios are present in the candidate but not in the baseline:
+#### Significant differences
 
-{% for scenario in scenarios_missing_in_baseline %}
-* {{scenario}}
-{% endfor %}
-
-{% endif %}
-
-## Significant instruction count differences
-
-{% if significant_icount_diffs.is_empty() %}
+{% if icount.significant_diffs.is_empty() %}
 
 _There are no significant instruction count differences_
 
 {% else %}
 
-{% call macros::table(significant_icount_diffs, cachegrind_diff_url, true) %}
+⚠️ There are significant instruction count differences
+
+<details>
+<summary>Click to expand</summary>
+
+{% call macros::icount_table(icount.significant_diffs, cachegrind_diff_url, true) %}
+
+</details>
 
 {% endif %}
 
-## Other instruction count differences
+#### Other differences
 
-{% if significant_icount_diffs.is_empty() %}
+{% if icount.significant_diffs.is_empty() %}
 
 _There are no other instruction count differences_
 
@@ -37,7 +36,47 @@ _There are no other instruction count differences_
 <details>
 <summary>Click to expand</summary>
 
-{% call macros::table(negligible_icount_diffs, cachegrind_diff_url, false) %}
+{% call macros::icount_table(icount.negligible_diffs, cachegrind_diff_url, false) %}
+
+</details>
+
+{% endif %}
+
+## Wall-time
+
+{% call macros::missing_scenarios(walltime.scenarios_missing_in_baseline) %}
+
+#### Significant differences
+
+{% if walltime.significant_diffs.is_empty() %}
+
+_There are no significant wall-time differences_
+
+{% else %}
+
+⚠️ There are significant wall-time differences
+
+<details>
+<summary>Click to expand</summary>
+
+{% call macros::walltime_table(walltime.significant_diffs, true) %}
+
+</details>
+
+{% endif %}
+
+#### Other differences
+
+{% if walltime.negligible_diffs.is_empty() %}
+
+_There are no other wall-time count differences_
+
+{% else %}
+
+<details>
+<summary>Click to expand</summary>
+
+{% call macros::walltime_table(walltime.negligible_diffs, false) %}
 
 </details>
 

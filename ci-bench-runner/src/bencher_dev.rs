@@ -1,11 +1,10 @@
 use std::collections::HashMap;
+use std::default::Default;
 use std::sync::Arc;
 
+use bencher_client::json::project::metric_kind::{INSTRUCTIONS_SLUG_STR, LATENCY_SLUG_STR};
 use bencher_client::{
-    json::{
-        project::metric_kind::INSTRUCTIONS_SLUG_STR, DateTime, JsonMetric, JsonMetricsMap,
-        JsonReport, JsonResultsMap, MetricKind,
-    },
+    json::{DateTime, JsonMetric, JsonMetricsMap, JsonReport, JsonResultsMap, MetricKind},
     types::{Adapter, JsonNewReport, JsonReportSettings},
     BencherClient,
 };
@@ -33,25 +32,27 @@ impl BencherDev {
         }
     }
 
-    /// Sends the instruction counts to bencher.dev for visualization
-    pub async fn track_icounts(
+    /// Sends the icount and walltime results to bencher.dev for visualization
+    pub async fn track_results(
         &self,
         branch: &str,
         hash: &str,
         start_time: DateTime,
         end_time: DateTime,
         icounts: HashMap<String, f64>,
+        walltimes: HashMap<String, f64>,
     ) -> anyhow::Result<()> {
-        let results = icounts_to_bmf(icounts);
-        let testbed = self.config.testbed_id.clone();
+        let mut bmf_map = results_to_bmf(icounts, INSTRUCTIONS_SLUG_STR.parse().unwrap());
+        bmf_map.extend(results_to_bmf(walltimes, LATENCY_SLUG_STR.parse().unwrap()));
 
+        let testbed = self.config.testbed_id.clone();
         let report = JsonNewReport {
             branch: branch.parse()?,
             hash: Some(hash.parse()?),
             testbed: testbed.into(),
             start_time: start_time.into(),
             end_time: end_time.into(),
-            results: vec![serde_json::to_string(&results)?],
+            results: vec![serde_json::to_string(&bmf_map)?],
             settings: Some(JsonReportSettings {
                 adapter: Some(Adapter::Json),
                 average: None,
@@ -84,9 +85,8 @@ impl BencherDev {
 /// Converts the instruction counts map into Bencher Metric Format (BMF)
 ///
 /// See <https://bencher.dev/docs/explanation/adapters#-json> for details
-fn icounts_to_bmf(icounts: HashMap<String, f64>) -> JsonResultsMap {
-    let instructions: MetricKind = INSTRUCTIONS_SLUG_STR.parse().unwrap();
-    icounts
+fn results_to_bmf(results: HashMap<String, f64>, kind: MetricKind) -> JsonResultsMap {
+    results
         .into_iter()
         .filter_map(|(scenario_name, value)| {
             let benchmark_name = match scenario_name.parse() {
@@ -105,7 +105,7 @@ fn icounts_to_bmf(icounts: HashMap<String, f64>) -> JsonResultsMap {
                 value: value.into(),
                 ..Default::default()
             };
-            metrics.insert(instructions.clone(), metric);
+            metrics.insert(kind.clone(), metric);
             Some((benchmark_name, metrics))
         })
         .collect()

@@ -7,6 +7,7 @@ use std::time::Instant;
 use anyhow::{bail, Context};
 use tracing::trace;
 
+use crate::job::walltimes_path;
 use crate::CommitIdentifier;
 
 pub trait BenchRunner: Send + Sync {
@@ -81,7 +82,7 @@ impl BenchRunner for LocalBenchRunner {
 
         // Build benchmarks
         let bench_path = checkout_target_dir.join("ci-bench");
-        trace!("building ci benchmarks");
+        trace!("building benchmarks");
 
         let start = Instant::now();
         let mut command = Command::new("cargo");
@@ -98,12 +99,12 @@ impl BenchRunner for LocalBenchRunner {
             (Instant::now() - start).as_secs_f64()
         );
 
-        // Run benchmarks
+        // Run icount benchmarks
         let bench_exe_path = checkout_target_dir.join("target/release/rustls-ci-bench");
         fs::create_dir_all(job_output_dir).context("Unable to create dir for job output")?;
 
         let start = Instant::now();
-        let mut command = Command::new(bench_exe_path);
+        let mut command = Command::new(&bench_exe_path);
         command
             .arg("run-all")
             .arg("--output-dir")
@@ -113,7 +114,34 @@ impl BenchRunner for LocalBenchRunner {
         run_command(command, command_logs)?;
 
         trace!(
-            "benchmarks run in {:.2}",
+            "icount benchmarks run in {:.2} s",
+            (Instant::now() - start).as_secs_f64()
+        );
+
+        // Run walltime benchmarks (under setarch to disable ASLR, to reduce noise)
+        trace!("running walltime benchmarks");
+        let start = Instant::now();
+
+        let mut command = Command::new("setarch");
+        command
+            .arg("-R")
+            .arg(bench_exe_path)
+            .arg("walltime")
+            .arg("--iterations-per-scenario")
+            .arg("100")
+            .current_dir(&bench_path);
+
+        run_command(command, command_logs)?;
+
+        // The walltimes are printed to stdout and captured in the logs, but we want them in a file
+        fs::write(
+            walltimes_path(job_output_dir),
+            &command_logs.last().unwrap().stdout,
+        )
+        .context("failed to write walltimes to disk")?;
+
+        trace!(
+            "walltime benchmarks run in {:.2} s",
             (Instant::now() - start).as_secs_f64()
         );
 

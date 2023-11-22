@@ -18,11 +18,11 @@ use tempfile::TempDir;
 use time::{Duration, OffsetDateTime};
 use tracing::{error, trace};
 
-use crate::db::{BenchResult, ComparisonResult, ScenarioDiff, ScenarioKind};
+use super::{icounts_path, read_icount_results, read_walltime_results, walltimes_path};
+use crate::db::{BenchResult, ComparisonResult, ComparisonSubResult, ScenarioDiff, ScenarioKind};
 use crate::event_queue::JobContext;
 use crate::github::api::{CommentEvent, PullRequestReviewEvent};
 use crate::github::{self, update_commit_status};
-use crate::job::read_results;
 use crate::runner::{write_logs_for_run, BenchRunner, Log};
 use crate::CommitIdentifier;
 
@@ -288,7 +288,24 @@ async fn bench_pr_and_cache_results(
         .result_history(cutoff_date)
         .await
         .context("could not obtain result history")?;
-    let significance_thresholds = calculate_significance_thresholds(historical_results);
+
+    let icount_results = historical_results
+        .iter()
+        .filter(|r| r.scenario_kind == ScenarioKind::Icount)
+        .cloned();
+    let icount_significance_thresholds =
+        calculate_significance_thresholds(icount_results, DEFAULT_ICOUNT_NOISE_THRESHOLD);
+
+    let walltime_results = historical_results
+        .into_iter()
+        .filter(|r| r.scenario_kind == ScenarioKind::Walltime);
+    let walltime_significance_thresholds =
+        calculate_significance_thresholds(walltime_results, DEFAULT_WALLTIME_NOISE_THRESHOLD);
+
+    let significance_thresholds = SignificanceThresholds {
+        icount: icount_significance_thresholds,
+        walltime: walltime_significance_thresholds,
+    };
 
     let job_output_dir = ctx.job_output_dir.clone();
     let runner = ctx.bench_runner.clone();
@@ -328,8 +345,7 @@ async fn bench_pr_and_cache_results(
             .store_comparison_result(
                 branches.baseline.commit_sha,
                 branches.candidate.commit_sha,
-                result.scenarios_missing_in_baseline.clone(),
-                result.diffs.clone(),
+                result.clone(),
             )
             .await
             .context("could not store comparison results")?;
@@ -358,7 +374,7 @@ fn compare_refs(
     job_output_path: &Path,
     logs: &mut BenchPrLogs,
     runner: &dyn BenchRunner,
-    significance_thresholds: &HashMap<String, f64>,
+    significance_thresholds: &SignificanceThresholds,
 ) -> anyhow::Result<ComparisonResult> {
     let candidate_repo = TempDir::new().context("Unable to create temp dir")?;
     let candidate_repo_path = candidate_repo.path().to_owned();
@@ -380,28 +396,53 @@ fn compare_refs(
         &mut logs.base,
     )?;
 
-    let baseline = read_results(&job_output_path.join("base/results/icounts.csv"))?;
-    let candidate = read_results(&job_output_path.join("candidate/results/icounts.csv"))?;
-    let (diffs, missing) = compare_results(
+    let icount_baseline = read_icount_results(&icounts_path(&job_output_path.join("base")))?;
+    let icount_candidate = read_icount_results(&icounts_path(&job_output_path.join("candidate")))?;
+    let (icount_diffs, icount_missing) = compare_results(
         job_output_path,
-        &baseline,
-        &candidate,
-        significance_thresholds,
+        &icount_baseline,
+        &icount_candidate,
+        &significance_thresholds.icount,
+        ScenarioKind::Icount,
+        DEFAULT_ICOUNT_NOISE_THRESHOLD,
+        MINIMUM_ICOUNT_NOISE_THRESHOLD,
+    )?;
+
+    let walltime_baseline = read_walltime_results(&walltimes_path(&job_output_path.join("base")))?;
+    let walltime_candidate =
+        read_walltime_results(&walltimes_path(&job_output_path.join("candidate")))?;
+    let (walltime_diffs, walltime_missing) = compare_results(
+        job_output_path,
+        &walltime_baseline,
+        &walltime_candidate,
+        &significance_thresholds.walltime,
+        ScenarioKind::Walltime,
+        DEFAULT_WALLTIME_NOISE_THRESHOLD,
+        MINIMUM_WALLTIME_NOISE_THRESHOLD,
     )?;
 
     Ok(ComparisonResult {
-        diffs,
-        scenarios_missing_in_baseline: missing,
+        icount: ComparisonSubResult {
+            diffs: icount_diffs,
+            scenarios_missing_in_baseline: icount_missing,
+        },
+        walltime: ComparisonSubResult {
+            diffs: walltime_diffs,
+            scenarios_missing_in_baseline: walltime_missing,
+        },
     })
 }
 
-fn calculate_significance_thresholds(historical_results: Vec<BenchResult>) -> HashMap<String, f64> {
+pub fn calculate_significance_thresholds(
+    historical_results: impl Iterator<Item = BenchResult>,
+    minimum_threshold: f64,
+) -> HashMap<String, f64> {
     let mut results_by_name = HashMap::new();
     for result in historical_results {
         results_by_name
             .entry(result.scenario_name)
             .or_insert(Vec::new())
-            .push(result.result as u64);
+            .push(result.result);
     }
 
     let mut outlier_bounds = HashMap::with_capacity(results_by_name.len());
@@ -417,7 +458,7 @@ fn calculate_significance_thresholds(historical_results: Vec<BenchResult>) -> Ha
         // (see https://github.com/rust-lang/rustc-perf/blob/4f313add609f43e928e98132358e8426ed3969ae/site/src/comparison.rs#L1219)
         let mut historic_changes = results
             .windows(2)
-            .map(|window| (window[0] as f64 - window[1] as f64).abs() / window[0] as f64)
+            .map(|window| (window[0] - window[1]).abs() / window[0])
             .collect::<Vec<_>>();
         historic_changes.sort_unstable_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Equal));
 
@@ -425,11 +466,16 @@ fn calculate_significance_thresholds(historical_results: Vec<BenchResult>) -> Ha
         let q3 = historic_changes[(historic_changes.len() * 3) / 4];
         let iqr = q3 - q1;
         let iqr_multiplier = 3.0;
-        let significance_threshold = f64::max(q3 + iqr * iqr_multiplier, DEFAULT_NOISE_THRESHOLD);
+        let significance_threshold = f64::max(q3 + iqr * iqr_multiplier, minimum_threshold);
         outlier_bounds.insert(name, significance_threshold);
     }
 
     outlier_bounds
+}
+
+struct SignificanceThresholds {
+    icount: HashMap<String, f64>,
+    walltime: HashMap<String, f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -458,19 +504,16 @@ fn markdown_comment(
     bencher_project_id: Option<&str>,
 ) -> String {
     match result {
-        Ok(bench_results) => {
-            let (significant, negligible) = split_on_threshold(bench_results.diffs);
-            ComparisonSuccessComment {
-                cachegrind_diff_url: diff_url,
-                significant_icount_diffs: significant,
-                negligible_icount_diffs: negligible,
-                scenarios_missing_in_baseline: bench_results.scenarios_missing_in_baseline,
-                branches,
-                bencher_project_id,
-            }
-            .render()
-            .expect("failed to render askama template")
+        Ok(bench_results) => ComparisonSuccessComment {
+            cachegrind_diff_url: diff_url,
+            icount: Diffs::from_sub_result(bench_results.icount),
+            walltime: Diffs::from_sub_result(bench_results.walltime),
+            branches,
+            bencher_project_id,
+            common_time_unit: |x, y| common_time_unit(*x, *y),
         }
+        .render()
+        .expect("failed to render askama template"),
         Err(error) => {
             let mut baseline_logs = String::new();
             write_logs_for_run(&mut baseline_logs, &error.logs.base);
@@ -495,6 +538,9 @@ fn compare_results(
     baseline: &HashMap<String, f64>,
     candidate: &HashMap<String, f64>,
     significance_thresholds: &HashMap<String, f64>,
+    scenario_kind: ScenarioKind,
+    default_noise_threshold: f64,
+    minimum_noise_threshold: f64,
 ) -> anyhow::Result<(Vec<ScenarioDiff>, Vec<String>)> {
     let mut diffs = Vec::new();
     let mut missing = Vec::new();
@@ -504,17 +550,22 @@ fn compare_results(
             continue;
         };
 
-        let cachegrind_diff = cachegrind_diff(job_output_path, scenario)?;
+        let cachegrind_diff = if scenario_kind == ScenarioKind::Icount {
+            cachegrind_diff(job_output_path, scenario)?
+        } else {
+            "No cachegrind diff available (this is a walltime benchmark)".to_string()
+        };
 
         diffs.push(ScenarioDiff {
             scenario_name: scenario.clone(),
-            scenario_kind: ScenarioKind::Icount,
+            scenario_kind,
             baseline_result: baseline_instr_count,
             candidate_result: instr_count,
             significance_threshold: significance_thresholds
                 .get(scenario)
                 .cloned()
-                .unwrap_or(DEFAULT_NOISE_THRESHOLD),
+                .unwrap_or(default_noise_threshold)
+                .max(minimum_noise_threshold),
             cachegrind_diff,
         });
     }
@@ -615,18 +666,38 @@ pub fn cachegrind_diff(job_output_path: &Path, scenario: &str) -> anyhow::Result
 #[derive(Template)]
 #[template(path = "comparison_success_comment.md")]
 pub struct ComparisonSuccessComment<'a> {
-    /// Significant icount diffs, per scenario
-    significant_icount_diffs: Vec<ScenarioDiff>,
-    /// Negligible icount diffs, per scenario
-    negligible_icount_diffs: Vec<ScenarioDiff>,
-    /// Benchmark scenarios present in the candidate but missing in the baseline
-    scenarios_missing_in_baseline: Vec<String>,
+    /// Diffs for the icount benchmarks
+    icount: Diffs,
+    /// Diffs for the walltime benchmarks
+    walltime: Diffs,
     /// The base url to obtain cachegrind diffs
     cachegrind_diff_url: &'a str,
     /// Information about the branches that were compared
     branches: &'a PrBranches,
     /// Bencher's project id, if available
     bencher_project_id: Option<&'a str>,
+    /// A function to obtain the time unit used to report the walltimes
+    common_time_unit: fn(&f64, &f64) -> TimeUnit,
+}
+
+pub struct Diffs {
+    /// Significant diffs, per scenario
+    significant_diffs: Vec<ScenarioDiff>,
+    /// Negligible diffs, per scenario
+    negligible_diffs: Vec<ScenarioDiff>,
+    /// Benchmark scenarios present in the candidate but missing in the baseline
+    scenarios_missing_in_baseline: Vec<String>,
+}
+
+impl Diffs {
+    fn from_sub_result(sub_result: ComparisonSubResult) -> Self {
+        let (significant_diffs, negligible_diffs) = split_on_threshold(sub_result.diffs);
+        Diffs {
+            significant_diffs,
+            negligible_diffs,
+            scenarios_missing_in_baseline: sub_result.scenarios_missing_in_baseline,
+        }
+    }
 }
 
 #[derive(Template)]
@@ -642,7 +713,58 @@ pub struct ComparisonErrorComment<'a> {
     baseline_logs: String,
 }
 
-static DEFAULT_NOISE_THRESHOLD: f64 = 0.002;
+/// Returns a time unit that has enough resolution to represent both values
+fn common_time_unit(x: f64, y: f64) -> TimeUnit {
+    let max = x.max(y);
+    if max < 1_000.0 {
+        TimeUnit::Nanoseconds
+    } else if max < 1_000_000.0 {
+        TimeUnit::Microseconds
+    } else if max < 1_000_000_000.0 {
+        TimeUnit::Milliseconds
+    } else {
+        TimeUnit::Seconds
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+enum TimeUnit {
+    Nanoseconds,
+    Microseconds,
+    Milliseconds,
+    Seconds,
+}
+
+static DEFAULT_ICOUNT_NOISE_THRESHOLD: f64 = 0.002; // 0.2%
+static MINIMUM_ICOUNT_NOISE_THRESHOLD: f64 = 0.002; // 0.2%
+static DEFAULT_WALLTIME_NOISE_THRESHOLD: f64 = 0.05; // 5%
+static MINIMUM_WALLTIME_NOISE_THRESHOLD: f64 = 0.01; // 1%
+
+/// Functions inside this module will be available as askama filters
+mod filters {
+    use std::borrow::Borrow;
+
+    use super::*;
+
+    pub fn format_timing(
+        timing_ns: impl Borrow<f64>,
+        unit: impl Borrow<TimeUnit>,
+    ) -> askama::Result<String> {
+        // Note: we need to use `Borrow` to sidestep askama limitations (plain types result in
+        // compile errors)
+        let timing_ns = *timing_ns.borrow();
+        let unit = *unit.borrow();
+
+        let (number, unit, precision) = match unit {
+            TimeUnit::Nanoseconds => (timing_ns, "ns", 0),
+            TimeUnit::Microseconds => (timing_ns / 1_000.0, "µs", 2),
+            TimeUnit::Milliseconds => (timing_ns / 1_000_000.0, "ms", 2),
+            TimeUnit::Seconds => (timing_ns / 1_000_000_000.0, "s", 2),
+        };
+
+        Ok(format!("{number:.0$} {unit}", precision))
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -675,8 +797,44 @@ mod test {
     }
 
     #[test]
+    fn test_common_time_unit() {
+        assert_eq!(common_time_unit(500.0, 999.0), TimeUnit::Nanoseconds);
+        assert_eq!(common_time_unit(500.0, 1_999.0), TimeUnit::Microseconds);
+        assert_eq!(common_time_unit(1_000.0, 1_999.0), TimeUnit::Microseconds);
+        assert_eq!(
+            common_time_unit(1_000_000.0, 1_999.0),
+            TimeUnit::Milliseconds
+        );
+        assert_eq!(
+            common_time_unit(1_000_000_000.0, 1_999.0),
+            TimeUnit::Seconds
+        );
+    }
+
+    #[test]
+    fn format_timing() {
+        assert_eq!(
+            filters::format_timing(100.0, TimeUnit::Nanoseconds).unwrap(),
+            "100 ns"
+        );
+        assert_eq!(
+            filters::format_timing(1_500.0, TimeUnit::Microseconds).unwrap(),
+            "1.50 µs"
+        );
+        assert_eq!(
+            filters::format_timing(1_250_000.0, TimeUnit::Milliseconds).unwrap(),
+            "1.25 ms"
+        );
+        assert_eq!(
+            filters::format_timing(1_420_000_000.0, TimeUnit::Seconds).unwrap(),
+            "1.42 s"
+        );
+    }
+
+    #[test]
     fn calculate_outlier_bounds_not_enough_results() {
-        let thresholds = calculate_significance_thresholds(Vec::new());
+        let thresholds =
+            calculate_significance_thresholds(std::iter::empty(), MINIMUM_ICOUNT_NOISE_THRESHOLD);
         assert_eq!(thresholds.len(), 0);
     }
 
@@ -686,14 +844,13 @@ mod test {
             100.0, 97.0, 98.0, 101.0, 100.0, 99.0, 97.0, 102.0, 99.0, 98.0,
         ];
 
-        let bench_results = historical_results
-            .into_iter()
-            .map(|result| BenchResult {
-                scenario_name: "foo".to_string(),
-                result,
-            })
-            .collect();
-        let thresholds = calculate_significance_thresholds(bench_results);
+        let bench_results = historical_results.into_iter().map(|result| BenchResult {
+            scenario_name: "foo".to_string(),
+            scenario_kind: ScenarioKind::Icount,
+            result,
+        });
+        let thresholds =
+            calculate_significance_thresholds(bench_results, MINIMUM_ICOUNT_NOISE_THRESHOLD);
 
         assert_eq!(thresholds.len(), 1);
         assert_eq!((thresholds["foo"] * 100.0).round(), 9.0);
@@ -705,12 +862,13 @@ mod test {
             .take(10)
             .map(|result| BenchResult {
                 scenario_name: "foo".to_string(),
+                scenario_kind: ScenarioKind::Icount,
                 result,
-            })
-            .collect();
-        let thresholds = calculate_significance_thresholds(bench_results);
+            });
+        let thresholds =
+            calculate_significance_thresholds(bench_results, MINIMUM_ICOUNT_NOISE_THRESHOLD);
 
         assert_eq!(thresholds.len(), 1);
-        assert_eq!(thresholds["foo"], DEFAULT_NOISE_THRESHOLD);
+        assert_eq!(thresholds["foo"], DEFAULT_ICOUNT_NOISE_THRESHOLD);
     }
 }

@@ -1,14 +1,14 @@
 use std::fs;
-use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context};
 use bencher_client::json::DateTime;
 use tempfile::TempDir;
 use tracing::{trace, warn};
 
+use super::{icounts_path, read_icount_results, read_walltime_results, walltimes_path};
+use crate::db::ScenarioKind;
 use crate::event_queue::JobContext;
 use crate::github::api::PushEvent;
-use crate::job::read_results;
 use crate::runner::write_logs_for_run;
 use crate::CommitIdentifier;
 
@@ -41,7 +41,8 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
     let job_output_dir = ctx.job_output_dir.clone();
     let bench_runner = ctx.bench_runner.clone();
     let commit_sha = payload.after.clone();
-    let icounts_path = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        fs::create_dir_all(&job_output_dir).context("unable to create job output dir")?;
         let base_repo = TempDir::new().context("unable to create temp dir")?;
         let base_repo_path = base_repo.path().to_owned();
         let mut logs = Vec::new();
@@ -59,39 +60,50 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
 
         let mut s = String::new();
         write_logs_for_run(&mut s, &logs);
-        fs::write(ctx.job_output_dir.join("logs.md"), s).context("unable to write job logs")?;
+        fs::write(job_output_dir.join("logs.md"), s).context("unable to write job logs")?;
 
         result.with_context(|| {
             format!(
                 "unable to run benchmarks for main branch. Check the logs at {} for more details.",
                 job_output_dir.display()
             )
-        })?;
-
-        Ok(icounts_path(&job_output_dir))
+        })
     })
     .await
     .context("tokio task crashed unexpectedly")??;
 
     let benchmark_run_end = DateTime::now();
 
-    // Store the benchmark results in the database
-    let icounts =
-        read_results(&icounts_path).context("failed to read instruction counts from file")?;
+    // Get the benchmark results back from the filesystem
+    let icounts = read_icount_results(&icounts_path(&ctx.job_output_dir))
+        .context("failed to read instruction counts from file")?;
+    let walltimes = read_walltime_results(&walltimes_path(&ctx.job_output_dir))
+        .context("failed to read walltimes from file")?;
+
+    // Persist results in the DB and in bencher.dev
+    let results = icounts
+        .iter()
+        .map(|(scenario, result)| (scenario.clone(), ScenarioKind::Icount, *result))
+        .chain(
+            walltimes
+                .iter()
+                .map(|(scenario, result)| (scenario.clone(), ScenarioKind::Walltime, *result)),
+        )
+        .collect();
     ctx.db
-        .store_run_results(icounts.clone().into_iter().collect())
+        .store_run_results(results)
         .await
         .context("failed to store benchmark results")?;
 
-    // Send the benchmark results to bencher.dev
     if let Some(bencher_dev) = ctx.bencher_dev {
         let result = bencher_dev
-            .track_icounts(
+            .track_results(
                 MAIN_BRANCH,
                 &payload.after,
                 benchmark_run_start,
                 benchmark_run_end,
                 icounts,
+                walltimes,
             )
             .await
             .context("failed to send results to bencher.dev");
@@ -104,8 +116,4 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-fn icounts_path(base: &Path) -> PathBuf {
-    base.join("results/icounts.csv")
 }
