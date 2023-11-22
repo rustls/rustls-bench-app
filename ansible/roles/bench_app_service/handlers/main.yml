@@ -1,5 +1,7 @@
 ---
 - name: Start app
+  become: true
+  become_user: root
   ansible.builtin.systemd_service:
     name: ci-bench-runner
     state: restarted
