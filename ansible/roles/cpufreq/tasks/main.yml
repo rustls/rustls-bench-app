@@ -15,6 +15,8 @@
     group: root
     mode: u=rw,g=r,o=r
 - name: Enable systemd service
+  become: true
+  become_user: root
   ansible.builtin.systemd_service:
     name: set-scaling-governor
     state: started

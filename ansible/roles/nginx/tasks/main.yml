@@ -25,6 +25,8 @@
     dest: /etc/nginx/sites-enabled/{{ hostname }}.conf
     mode: u=rw,g=r,o=r
 - name: Reload nginx
+  become: true
+  become_user: root
   ansible.builtin.systemd_service:
     name: nginx
     state: reloaded
