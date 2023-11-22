@@ -584,6 +584,13 @@ fn print_report(result: ComparisonResult, cachegrind_diff_url: &str) -> String {
 /// Splits the diffs into two `Vec`s, the first one containing the diffs that exceed the threshold,
 /// the second one containing the rest
 fn split_on_threshold(diffs: Vec<ScenarioDiff>) -> (Vec<ScenarioDiff>, Vec<ScenarioDiff>) {
+    fn sort_by_abs_diff_ratio(diffs: &mut [ScenarioDiff]) {
+        diffs.sort_by(|s1, s2| {
+            f64::partial_cmp(&s2.diff_ratio().abs(), &s1.diff_ratio().abs())
+                .unwrap_or(Ordering::Equal)
+        });
+    }
+
     let mut significant = Vec::new();
     let mut negligible = Vec::new();
 
@@ -595,12 +602,8 @@ fn split_on_threshold(diffs: Vec<ScenarioDiff>) -> (Vec<ScenarioDiff>, Vec<Scena
         }
     }
 
-    significant.sort_by(|s1, s2| {
-        f64::partial_cmp(&s2.diff_ratio(), &s1.diff_ratio()).unwrap_or(Ordering::Equal)
-    });
-    negligible.sort_by(|s1, s2| {
-        f64::partial_cmp(&s2.diff_ratio(), &s1.diff_ratio()).unwrap_or(Ordering::Equal)
-    });
+    sort_by_abs_diff_ratio(&mut significant);
+    sort_by_abs_diff_ratio(&mut negligible);
 
     (significant, negligible)
 }
@@ -700,6 +703,32 @@ static DEFAULT_NOISE_THRESHOLD: f64 = 0.002;
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn split_on_threshold_sorts_using_absolute_value() {
+        fn diff(scenario: &str, baseline: f64, candidate: f64) -> ScenarioDiff {
+            ScenarioDiff {
+                scenario_name: scenario.to_string(),
+                scenario_kind: ScenarioKind::Icount,
+                baseline_result: baseline,
+                candidate_result: candidate,
+                significance_threshold: f64::MAX, // Everything is negligible
+                cachegrind_diff: String::new(),
+            }
+        }
+
+        let diffs = vec![
+            diff("x", 1.2, 1.0),
+            diff("y", 1.0, 1.0),
+            diff("z", 1.0, 1.25),
+        ];
+
+        let (significant, negligible) = split_on_threshold(diffs);
+        assert!(significant.is_empty());
+        assert_eq!(negligible[0].scenario_name, "z");
+        assert_eq!(negligible[1].scenario_name, "x");
+        assert_eq!(negligible[2].scenario_name, "y");
+    }
 
     #[test]
     fn calculate_outlier_bounds_not_enough_results() {
