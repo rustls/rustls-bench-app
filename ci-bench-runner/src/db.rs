@@ -4,7 +4,6 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Context};
 use octocrab::models::CommentId;
 use serde::Serialize;
-use serde_json::json;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Connection, Error, FromRow, Row, SqliteConnection};
 use time::OffsetDateTime;
@@ -64,10 +63,13 @@ pub struct BenchJob {
 }
 
 /// A result for a specific benchmark scenario
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct BenchResult {
     /// The scenario's name
     pub scenario_name: String,
+    /// The scenario's kind
+    #[sqlx(try_from = "i64")]
+    pub scenario_kind: ScenarioKind,
     /// The benchmark's measured result
     ///
     /// We use f64 here to support multiple kinds of measurement (i.e. not only instruction counts,
@@ -76,8 +78,16 @@ pub struct BenchResult {
 }
 
 /// The results of a comparison between two branches of rustls
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ComparisonResult {
+    /// Result for the icount benchmarks
+    pub icount: ComparisonSubResult,
+    /// Result for the walltime benchmarks
+    pub walltime: ComparisonSubResult,
+}
+
+#[derive(Debug, Clone)]
+pub struct ComparisonSubResult {
     /// The diffs, per scenario
     pub diffs: Vec<ScenarioDiff>,
     /// Benchmark scenarios present in the candidate but missing in the baseline
@@ -118,6 +128,7 @@ impl ScenarioDiff {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ScenarioKind {
     Icount = 0,
+    Walltime = 1,
 }
 
 impl TryFrom<i64> for ScenarioKind {
@@ -126,6 +137,7 @@ impl TryFrom<i64> for ScenarioKind {
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::Icount),
+            1 => Ok(Self::Walltime),
             kind => bail!("invalid scenario kind: {kind}"),
         }
     }
@@ -291,10 +303,10 @@ impl Db {
     }
 
     /// Stores the results of a bench run to the database
-    #[tracing::instrument(skip(self, icount_results), ret)]
+    #[tracing::instrument(skip(self, results), ret)]
     pub async fn store_run_results(
         &self,
-        icount_results: Vec<(String, f64)>,
+        results: Vec<(String, ScenarioKind, f64)>,
     ) -> anyhow::Result<Uuid> {
         let bench_run_id = Uuid::new_v4();
 
@@ -310,12 +322,13 @@ impl Db {
                     .await?;
 
                 // Add benchmark results
-                for (scenario_name, result) in icount_results {
+                for (scenario_name, scenario_kind, result) in results {
                     sqlx::query(
-                        "INSERT INTO bench_results (bench_run_id, scenario_name, result) VALUES (?, ?, ?)",
+                        "INSERT INTO bench_results (bench_run_id, scenario_name, scenario_kind, result) VALUES (?, ?, ?, ?)",
                     )
                     .bind(bench_run_id.as_bytes().as_slice())
                     .bind(scenario_name)
+                    .bind(scenario_kind as i64)
                     .bind(result)
                     .execute(t.deref_mut())
                     .await?;
@@ -338,7 +351,7 @@ impl Db {
         let mut conn = self.sqlite.lock().await;
         let results = sqlx::query_as(
             r"
-            SELECT scenario_name, result
+            SELECT scenario_name, scenario_kind, result
             FROM bench_results JOIN
                 (SELECT id FROM bench_runs WHERE created_utc > ? ORDER BY created_utc)
             ON id = bench_run_id",
@@ -351,19 +364,24 @@ impl Db {
     }
 
     /// Stores the result of a comparison between two branches of rustls
-    #[tracing::instrument(skip(self, diffs))]
+    #[tracing::instrument(skip(self, result))]
     pub async fn store_comparison_result(
         &self,
         baseline_commit: String,
         candidate_commit: String,
-        scenarios_missing: Vec<String>,
-        diffs: Vec<ScenarioDiff>,
+        result: ComparisonResult,
     ) -> anyhow::Result<Uuid> {
-        let scenarios_missing = if scenarios_missing.is_empty() {
-            None
-        } else {
-            Some(json!(scenarios_missing).to_string())
-        };
+        fn to_json_array(values: &[String]) -> Option<String> {
+            if values.is_empty() {
+                None
+            } else {
+                Some(serde_json::to_string(&values).expect("unreachable code"))
+            }
+        }
+
+        let icount_scenarios_missing = to_json_array(&result.icount.scenarios_missing_in_baseline);
+        let walltime_scenarios_missing =
+            to_json_array(&result.walltime.scenarios_missing_in_baseline);
 
         let mut conn = self.sqlite.lock().await;
         let id = conn.transaction(|t| {
@@ -372,18 +390,19 @@ impl Db {
                 let id = Uuid::new_v4();
                 let now = OffsetDateTime::now_utc();
                 sqlx::query(
-                    "INSERT INTO comparison_runs (id, created_utc, baseline_commit, candidate_commit, scenarios_missing_in_baseline) VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO comparison_runs (id, created_utc, baseline_commit, candidate_commit, icount_scenarios_missing_in_baseline, walltime_scenarios_missing_in_baseline) VALUES (?, ?, ?, ?, ?, ?)",
                 )
                     .bind(id.as_bytes().as_slice())
                     .bind(now)
                     .bind(baseline_commit)
                     .bind(candidate_commit)
-                    .bind(scenarios_missing)
+                    .bind(icount_scenarios_missing)
+                    .bind(walltime_scenarios_missing)
                     .execute(t.deref_mut())
                     .await?;
 
                 // Insert the associated diffs
-                for diff in diffs {
+                for diff in result.icount.diffs.into_iter().chain(result.walltime.diffs) {
                     sqlx::query(
                         "INSERT INTO scenario_diffs (comparison_run_id, scenario_name, scenario_kind, baseline_result, candidate_result, significance_threshold, cachegrind_diff) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     )
@@ -413,10 +432,17 @@ impl Db {
         baseline_commit: &str,
         candidate_commit: &str,
     ) -> anyhow::Result<Option<ComparisonResult>> {
+        fn from_json_array(values: Option<String>) -> anyhow::Result<Vec<String>> {
+            match values {
+                None => Ok(Vec::new()),
+                Some(missing) => serde_json::from_str(&missing).context("invalid JSON in db"),
+            }
+        }
+
         let mut conn = self.sqlite.lock().await;
         let row = sqlx::query(
             r"
-            SELECT id, created_utc, scenarios_missing_in_baseline
+            SELECT id, created_utc, icount_scenarios_missing_in_baseline, walltime_scenarios_missing_in_baseline
             FROM comparison_runs
             WHERE baseline_commit = ? AND candidate_commit = ?",
         )
@@ -430,27 +456,42 @@ impl Db {
         };
 
         let id: Vec<u8> = row.try_get("id")?;
-        let scenarios_missing_in_baseline: Option<String> =
-            row.try_get("scenarios_missing_in_baseline")?;
-        let scenarios_missing_in_baseline = match scenarios_missing_in_baseline {
-            None => Vec::new(),
-            Some(missing) => serde_json::from_str(&missing)
-                .context("invalid JSON in db for `scenarios_missing_in_baseline` column")?,
-        };
+        let icount_scenarios_missing_in_baseline =
+            from_json_array(row.try_get("icount_scenarios_missing_in_baseline")?)?;
+        let walltime_scenarios_missing_in_baseline =
+            from_json_array(row.try_get("walltime_scenarios_missing_in_baseline")?)?;
 
-        let diffs = sqlx::query_as(
+        let icount_diffs = sqlx::query_as(
             r"
             SELECT *
             FROM scenario_diffs
-            WHERE comparison_run_id = ?",
+            WHERE comparison_run_id = ? AND scenario_kind = ?",
+        )
+        .bind(&id)
+        .bind(ScenarioKind::Icount as i32)
+        .fetch_all(conn.deref_mut())
+        .await?;
+
+        let walltime_diffs = sqlx::query_as(
+            r"
+            SELECT *
+            FROM scenario_diffs
+            WHERE comparison_run_id = ? AND scenario_kind = ?",
         )
         .bind(id)
+        .bind(ScenarioKind::Walltime as i64)
         .fetch_all(conn.deref_mut())
         .await?;
 
         Ok(Some(ComparisonResult {
-            diffs,
-            scenarios_missing_in_baseline,
+            icount: ComparisonSubResult {
+                scenarios_missing_in_baseline: icount_scenarios_missing_in_baseline,
+                diffs: icount_diffs,
+            },
+            walltime: ComparisonSubResult {
+                scenarios_missing_in_baseline: walltime_scenarios_missing_in_baseline,
+                diffs: walltime_diffs,
+            },
         }))
     }
 
@@ -567,11 +608,11 @@ mod test {
     async fn test_store_load_results_round_trips_and_orders_by_time() -> anyhow::Result<()> {
         let db = empty_db().await;
 
-        db.store_run_results(vec![("foo".to_string(), 42.0)])
+        db.store_run_results(vec![("foo".to_string(), ScenarioKind::Icount, 42.0)])
             .await?;
-        db.store_run_results(vec![("foo".to_string(), 41.0)])
+        db.store_run_results(vec![("foo".to_string(), ScenarioKind::Icount, 41.0)])
             .await?;
-        db.store_run_results(vec![("foo".to_string(), 43.0)])
+        db.store_run_results(vec![("foo".to_string(), ScenarioKind::Walltime, 43.0)])
             .await?;
 
         let history = db
@@ -580,8 +621,11 @@ mod test {
 
         assert_eq!(history.len(), 3);
         assert_eq!(history[0].result, 42.0);
+        assert_eq!(history[0].scenario_kind, ScenarioKind::Icount);
         assert_eq!(history[1].result, 41.0);
+        assert_eq!(history[1].scenario_kind, ScenarioKind::Icount);
         assert_eq!(history[2].result, 43.0);
+        assert_eq!(history[2].scenario_kind, ScenarioKind::Walltime);
 
         Ok(())
     }
@@ -620,32 +664,44 @@ mod test {
     async fn test_store_load_comparison_diff_round_trips() -> anyhow::Result<()> {
         let db = empty_db().await;
 
+        fn make_diffs(scenario_kind: ScenarioKind) -> Vec<ScenarioDiff> {
+            vec![
+                ScenarioDiff {
+                    scenario_name: "foo".to_string(),
+                    scenario_kind,
+                    candidate_result: 42.0,
+                    baseline_result: 42.5,
+                    significance_threshold: 0.3,
+                    cachegrind_diff: "fake cachegrind diff".to_string(),
+                },
+                ScenarioDiff {
+                    scenario_name: "bar".to_string(),
+                    scenario_kind,
+                    candidate_result: 100.0,
+                    baseline_result: 104.0,
+                    significance_threshold: 5.0,
+                    cachegrind_diff: "fake cachegrind diff 2".to_string(),
+                },
+            ]
+        }
+
         let baseline_commit = "c609978130843652696e748bb9c9f73703d79089";
         let candidate_commit = "7faf240afbdbb4e76c47ff5f3f049c7a78c9c843";
-        let diffs = vec![
-            ScenarioDiff {
-                scenario_name: "foo".to_string(),
-                scenario_kind: ScenarioKind::Icount,
-                candidate_result: 42.0,
-                baseline_result: 42.5,
-                significance_threshold: 0.3,
-                cachegrind_diff: "fake cachegrind diff".to_string(),
-            },
-            ScenarioDiff {
-                scenario_name: "bar".to_string(),
-                scenario_kind: ScenarioKind::Icount,
-                candidate_result: 100.0,
-                baseline_result: 104.0,
-                significance_threshold: 5.0,
-                cachegrind_diff: "fake cachegrind diff 2".to_string(),
-            },
-        ];
+        let icount_diffs = make_diffs(ScenarioKind::Icount);
 
         db.store_comparison_result(
             baseline_commit.to_string(),
             candidate_commit.to_string(),
-            Vec::new(),
-            diffs.clone(),
+            ComparisonResult {
+                icount: ComparisonSubResult {
+                    scenarios_missing_in_baseline: Vec::new(),
+                    diffs: icount_diffs.clone(),
+                },
+                walltime: ComparisonSubResult {
+                    scenarios_missing_in_baseline: Vec::new(),
+                    diffs: make_diffs(ScenarioKind::Walltime),
+                },
+            },
         )
         .await?;
         let comparison = db
@@ -656,13 +712,16 @@ mod test {
             bail!("no comparison results found for the provided commits");
         };
 
-        assert!(comparison.scenarios_missing_in_baseline.is_empty());
-        assert_eq!(comparison.diffs.len(), 2);
+        assert!(comparison.icount.scenarios_missing_in_baseline.is_empty());
+        assert!(comparison.walltime.scenarios_missing_in_baseline.is_empty());
+        assert_eq!(comparison.icount.diffs.len(), 2);
+        assert_eq!(comparison.walltime.diffs.len(), 2);
 
         comparison
+            .icount
             .diffs
             .sort_by(|d1, d2| d1.scenario_name.cmp(&d2.scenario_name));
-        assert_eq!(comparison.diffs[0], diffs[1]);
+        assert_eq!(comparison.icount.diffs[0], icount_diffs[1]);
 
         let cachegrind_diff = db
             .cachegrind_diff(baseline_commit, candidate_commit, "foo")
@@ -696,8 +755,16 @@ mod test {
         db.store_comparison_result(
             baseline_commit.to_string(),
             candidate_commit.to_string(),
-            vec!["bar".to_string()],
-            diffs.clone(),
+            ComparisonResult {
+                icount: ComparisonSubResult {
+                    diffs: diffs.clone(),
+                    scenarios_missing_in_baseline: vec!["bar".to_string()],
+                },
+                walltime: ComparisonSubResult {
+                    diffs: Vec::new(),
+                    scenarios_missing_in_baseline: vec!["baz".to_string()],
+                },
+            },
         )
         .await?;
         let comparison = db
@@ -709,11 +776,16 @@ mod test {
         };
 
         assert_eq!(
-            comparison.scenarios_missing_in_baseline,
+            comparison.icount.scenarios_missing_in_baseline,
             ["bar".to_string()]
         );
-        assert_eq!(comparison.diffs.len(), 1);
-        assert_eq!(comparison.diffs[0], diffs[0]);
+        assert_eq!(
+            comparison.walltime.scenarios_missing_in_baseline,
+            ["baz".to_string()]
+        );
+        assert_eq!(comparison.icount.diffs.len(), 1);
+        assert_eq!(comparison.icount.diffs[0], diffs[0]);
+        assert!(comparison.walltime.diffs.is_empty());
 
         Ok(())
     }

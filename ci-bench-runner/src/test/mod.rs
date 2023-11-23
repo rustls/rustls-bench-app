@@ -21,7 +21,7 @@ use uuid::Uuid;
 use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, MockGuard, MockServer, ResponseTemplate};
 
-use crate::db::{ScenarioDiff, ScenarioKind};
+use crate::db::{ComparisonResult, ComparisonSubResult, ScenarioDiff, ScenarioKind};
 use crate::event_queue::{JobStatus, JobView};
 use crate::runner::{BenchRunner, Log};
 use crate::{
@@ -126,17 +126,27 @@ impl BenchRunner for MockBenchRunner {
             std::thread::sleep(duration);
         }
 
-        // Store fake results for the comparison, including cachegrind raw files
+        // Generate fake results for this run
         let results_dir = job_output_dir.join("results");
-        let cachegrind_dir = results_dir.join("cachegrind");
         fs::create_dir_all(&results_dir)?;
-        fs::create_dir(&cachegrind_dir)?;
+
+        // Fake icounts
         fs::write(results_dir.join("icounts.csv"), "fake_bench,12345")?;
+
+        // Fake cachegrind output
+        let cachegrind_dir = results_dir.join("cachegrind");
+        fs::create_dir(&cachegrind_dir)?;
         fs::write(
             cachegrind_dir.join("calibration"),
             cachegrind::SAMPLE_OUTPUT,
         )?;
         fs::write(cachegrind_dir.join("fake_bench"), cachegrind::SAMPLE_OUTPUT)?;
+
+        // Fake walltimes
+        fs::write(
+            results_dir.join("walltimes.csv"),
+            "fake_walltime_bench,12345,12432,12211",
+        )?;
 
         // Notify any watchers of this call
         self.runs_tx
@@ -384,15 +394,23 @@ async fn test_pr_synchronize_cached() {
         .store_comparison_result(
             "7edbfb999b352aa09fe669e9103d8155d7e7d890".to_string(),
             "b0b69e925b2c9c6187cb16f361dd36e156f8e097".to_string(),
-            Vec::new(),
-            vec![ScenarioDiff {
-                scenario_name: "foo".to_string(),
-                scenario_kind: ScenarioKind::Icount,
-                baseline_result: 1000.0,
-                candidate_result: 1001.0,
-                significance_threshold: 0.35,
-                cachegrind_diff: "dummy cachegrind diff".to_string(),
-            }],
+            ComparisonResult {
+                icount: ComparisonSubResult {
+                    scenarios_missing_in_baseline: Vec::new(),
+                    diffs: vec![ScenarioDiff {
+                        scenario_name: "foo".to_string(),
+                        scenario_kind: ScenarioKind::Icount,
+                        baseline_result: 1000.0,
+                        candidate_result: 1001.0,
+                        significance_threshold: 0.35,
+                        cachegrind_diff: "dummy cachegrind diff".to_string(),
+                    }],
+                },
+                walltime: ComparisonSubResult {
+                    scenarios_missing_in_baseline: vec!["bar".to_string()],
+                    diffs: Vec::new(),
+                },
+            },
         )
         .await
         .unwrap();
@@ -543,7 +561,7 @@ async fn test_push_happy_path() {
         .await
         .unwrap()
         .len();
-    assert_eq!(result_count, 2);
+    assert_eq!(result_count, 4);
 }
 
 #[tokio::test]
@@ -557,15 +575,23 @@ async fn test_get_cachegrind_diff() {
         .store_comparison_result(
             "7edbfb999b352aa09fe669e9103d8155d7e7d890".to_string(),
             "b0b69e925b2c9c6187cb16f361dd36e156f8e097".to_string(),
-            Vec::new(),
-            vec![ScenarioDiff {
-                scenario_name: "foo".to_string(),
-                scenario_kind: ScenarioKind::Icount,
-                baseline_result: 1000.0,
-                candidate_result: 1001.0,
-                significance_threshold: 0.35,
-                cachegrind_diff: "dummy cachegrind diff".to_string(),
-            }],
+            ComparisonResult {
+                icount: ComparisonSubResult {
+                    scenarios_missing_in_baseline: Vec::new(),
+                    diffs: vec![ScenarioDiff {
+                        scenario_name: "foo".to_string(),
+                        scenario_kind: ScenarioKind::Icount,
+                        baseline_result: 1000.0,
+                        candidate_result: 1001.0,
+                        significance_threshold: 0.35,
+                        cachegrind_diff: "dummy cachegrind diff".to_string(),
+                    }],
+                },
+                walltime: ComparisonSubResult {
+                    scenarios_missing_in_baseline: vec!["bar".to_string()],
+                    diffs: Vec::new(),
+                },
+            },
         )
         .await
         .unwrap();
@@ -787,9 +813,7 @@ impl MockGitHub {
                 r"/repos/{}/issues/\d+/comments",
                 Self::repo_path()
             )))
-            .and(body_string_contains(
-                "Significant instruction count differences",
-            ))
+            .and(body_string_contains("# Benchmark results"))
             .respond_with(ResponseTemplate::new(201).set_body_string(api::CREATE_COMMENT))
             .expect(1)
             .named("post_comment");
@@ -803,9 +827,7 @@ impl MockGitHub {
                 r"/repos/{}/issues/comments/\d+",
                 Self::repo_path()
             )))
-            .and(body_string_contains(
-                "Significant instruction count differences",
-            ))
+            .and(body_string_contains("# Benchmark results"))
             .respond_with(ResponseTemplate::new(201).set_body_string(api::CREATE_COMMENT))
             .expect(1)
             .named("update_comment");

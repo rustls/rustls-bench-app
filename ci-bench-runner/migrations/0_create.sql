@@ -8,6 +8,7 @@ CREATE INDEX idx_bench_runs_created_utc ON bench_runs(created_utc);
 CREATE TABLE bench_results(
    bench_run_id BLOB NOT NULL,
    scenario_name TEXT NOT NULL,
+   scenario_kind INTEGER NOT NULL,
    result REAL NOT NULL,
    FOREIGN KEY (bench_run_id) REFERENCES bench_runs(id)
 ) STRICT;
@@ -17,7 +18,8 @@ CREATE TABLE comparison_runs(
     created_utc TEXT NOT NULL,
     baseline_commit TEXT NOT NULL,
     candidate_commit TEXT NOT NULL,
-    scenarios_missing_in_baseline TEXT
+    icount_scenarios_missing_in_baseline TEXT,
+    walltime_scenarios_missing_in_baseline TEXT
 ) STRICT;
 
 CREATE INDEX idx_comparison_run_commits ON comparison_runs(baseline_commit, candidate_commit);
@@ -32,6 +34,8 @@ CREATE TABLE scenario_diffs(
     cachegrind_diff TEXT NOT NULL,
     FOREIGN KEY (comparison_run_id) REFERENCES comparison_runs(id)
 ) STRICT;
+
+CREATE INDEX idx_scenario_diffs_by_kind ON scenario_diffs(comparison_run_id, scenario_kind);
 
 CREATE TABLE event_queue(
     id BLOB PRIMARY KEY,
