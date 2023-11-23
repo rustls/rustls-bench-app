@@ -80,7 +80,7 @@ impl EventQueue {
                     octocrab.clone(),
                 );
 
-                info!("background task started for event queue job {active_job_id:?}");
+                info!("background task started for event queue");
                 match background_task.await {
                     Ok(Ok(_)) => {
                         // The task finished normally, no need to restart it
