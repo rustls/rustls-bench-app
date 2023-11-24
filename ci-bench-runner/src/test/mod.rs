@@ -403,7 +403,7 @@ async fn test_pr_synchronize_cached() {
                         baseline_result: 1000.0,
                         candidate_result: 1001.0,
                         significance_threshold: 0.35,
-                        cachegrind_diff: "dummy cachegrind diff".to_string(),
+                        cachegrind_diff: Some("dummy cachegrind diff".to_string()),
                     }],
                 },
                 walltime: ComparisonSubResult {
@@ -584,7 +584,7 @@ async fn test_get_cachegrind_diff() {
                         baseline_result: 1000.0,
                         candidate_result: 1001.0,
                         significance_threshold: 0.35,
-                        cachegrind_diff: "dummy cachegrind diff".to_string(),
+                        cachegrind_diff: Some("dummy cachegrind diff".to_string()),
                     }],
                 },
                 walltime: ComparisonSubResult {

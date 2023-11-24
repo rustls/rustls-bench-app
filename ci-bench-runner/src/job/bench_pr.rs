@@ -551,9 +551,9 @@ fn compare_results(
         };
 
         let cachegrind_diff = if scenario_kind == ScenarioKind::Icount {
-            cachegrind_diff(job_output_path, scenario)?
+            Some(cachegrind_diff(job_output_path, scenario)?)
         } else {
-            "No cachegrind diff available (this is a walltime benchmark)".to_string()
+            None
         };
 
         diffs.push(ScenarioDiff {
@@ -779,7 +779,7 @@ mod test {
                 baseline_result: baseline,
                 candidate_result: candidate,
                 significance_threshold: f64::MAX, // Everything is negligible
-                cachegrind_diff: String::new(),
+                cachegrind_diff: Some(String::new()),
             }
         }
 

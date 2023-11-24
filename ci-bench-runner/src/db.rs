@@ -110,7 +110,7 @@ pub struct ScenarioDiff {
     /// Significance threshold derived from history, when the diff was created
     pub significance_threshold: f64,
     /// Instruction-level cachegrind diff, for icount scenarios
-    pub cachegrind_diff: String,
+    pub cachegrind_diff: Option<String>,
 }
 
 impl ScenarioDiff {
@@ -520,7 +520,7 @@ impl Db {
             return Ok(None);
         };
 
-        Ok(Some(row.try_get("cachegrind_diff")?))
+        Ok(row.try_get("cachegrind_diff")?)
     }
 
     /// Stores the id of the comment used to report results for a specific PR
@@ -665,6 +665,12 @@ mod test {
         let db = empty_db().await;
 
         fn make_diffs(scenario_kind: ScenarioKind) -> Vec<ScenarioDiff> {
+            let cachegrind_diff = if scenario_kind == ScenarioKind::Icount {
+                Some("fake cachegrind diff".to_string())
+            } else {
+                None
+            };
+
             vec![
                 ScenarioDiff {
                     scenario_name: "foo".to_string(),
@@ -672,7 +678,7 @@ mod test {
                     candidate_result: 42.0,
                     baseline_result: 42.5,
                     significance_threshold: 0.3,
-                    cachegrind_diff: "fake cachegrind diff".to_string(),
+                    cachegrind_diff: cachegrind_diff.clone(),
                 },
                 ScenarioDiff {
                     scenario_name: "bar".to_string(),
@@ -680,7 +686,7 @@ mod test {
                     candidate_result: 100.0,
                     baseline_result: 104.0,
                     significance_threshold: 5.0,
-                    cachegrind_diff: "fake cachegrind diff 2".to_string(),
+                    cachegrind_diff,
                 },
             ]
         }
@@ -688,6 +694,7 @@ mod test {
         let baseline_commit = "c609978130843652696e748bb9c9f73703d79089";
         let candidate_commit = "7faf240afbdbb4e76c47ff5f3f049c7a78c9c843";
         let icount_diffs = make_diffs(ScenarioKind::Icount);
+        let walltime_diffs = make_diffs(ScenarioKind::Walltime);
 
         db.store_comparison_result(
             baseline_commit.to_string(),
@@ -699,7 +706,7 @@ mod test {
                 },
                 walltime: ComparisonSubResult {
                     scenarios_missing_in_baseline: Vec::new(),
-                    diffs: make_diffs(ScenarioKind::Walltime),
+                    diffs: walltime_diffs.clone(),
                 },
             },
         )
@@ -721,7 +728,12 @@ mod test {
             .icount
             .diffs
             .sort_by(|d1, d2| d1.scenario_name.cmp(&d2.scenario_name));
+        comparison
+            .walltime
+            .diffs
+            .sort_by(|d1, d2| d1.scenario_name.cmp(&d2.scenario_name));
         assert_eq!(comparison.icount.diffs[0], icount_diffs[1]);
+        assert_eq!(comparison.walltime.diffs[0], walltime_diffs[1]);
 
         let cachegrind_diff = db
             .cachegrind_diff(baseline_commit, candidate_commit, "foo")
@@ -749,7 +761,7 @@ mod test {
             candidate_result: 42.0,
             baseline_result: 42.5,
             significance_threshold: 0.3,
-            cachegrind_diff: "fake cachegrind diff".to_string(),
+            cachegrind_diff: Some("fake cachegrind diff".to_string()),
         }];
 
         db.store_comparison_result(
