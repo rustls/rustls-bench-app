@@ -31,7 +31,7 @@ CREATE TABLE scenario_diffs(
     baseline_result REAL NOT NULL,
     candidate_result REAL NOT NULL,
     significance_threshold REAL NOT NULL,
-    cachegrind_diff TEXT NOT NULL,
+    cachegrind_diff TEXT,
     FOREIGN KEY (comparison_run_id) REFERENCES comparison_runs(id)
 ) STRICT;
 
