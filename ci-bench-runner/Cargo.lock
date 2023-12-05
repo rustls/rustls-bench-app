@@ -242,8 +242,8 @@ checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
 name = "bencher_client"
-version = "0.3.15"
-source = "git+https://github.com/bencherdev/bencher?rev=d0532976#d0532976155e49afaa9e2121a0f6a9ad5c654d29"
+version = "0.3.21"
+source = "git+https://github.com/bencherdev/bencher?rev=3a9945f#3a9945fcbcc01e8c0b5632be71828d1481b0422e"
 dependencies = [
  "bencher_json",
  "chrono",
@@ -262,8 +262,8 @@ dependencies = [
 
 [[package]]
 name = "bencher_json"
-version = "0.3.15"
-source = "git+https://github.com/bencherdev/bencher?rev=d0532976#d0532976155e49afaa9e2121a0f6a9ad5c654d29"
+version = "0.3.21"
+source = "git+https://github.com/bencherdev/bencher?rev=3a9945f#3a9945fcbcc01e8c0b5632be71828d1481b0422e"
 dependencies = [
  "bencher_valid",
  "chrono",
@@ -283,8 +283,8 @@ dependencies = [
 
 [[package]]
 name = "bencher_valid"
-version = "0.3.15"
-source = "git+https://github.com/bencherdev/bencher?rev=d0532976#d0532976155e49afaa9e2121a0f6a9ad5c654d29"
+version = "0.3.21"
+source = "git+https://github.com/bencherdev/bencher?rev=3a9945f#3a9945fcbcc01e8c0b5632be71828d1481b0422e"
 dependencies = [
  "base64 0.21.5",
  "chrono",
