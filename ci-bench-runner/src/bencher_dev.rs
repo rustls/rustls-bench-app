@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::sync::Arc;
 
-use bencher_client::json::project::metric_kind::{INSTRUCTIONS_SLUG_STR, LATENCY_SLUG_STR};
+use bencher_client::json::project::measure::{INSTRUCTIONS_SLUG_STR, LATENCY_SLUG_STR};
 use bencher_client::{
-    json::{DateTime, JsonMetric, JsonMetricsMap, JsonReport, JsonResultsMap, MetricKind},
+    json::{DateTime, JsonMetric, JsonMetricsMap, JsonReport, JsonResultsMap, Measure},
     types::{Adapter, JsonNewReport, JsonReportSettings},
     BencherClient,
 };
@@ -85,7 +85,7 @@ impl BencherDev {
 /// Converts the instruction counts map into Bencher Metric Format (BMF)
 ///
 /// See <https://bencher.dev/docs/explanation/adapters#-json> for details
-fn results_to_bmf(results: HashMap<String, f64>, kind: MetricKind) -> JsonResultsMap {
+fn results_to_bmf(results: HashMap<String, f64>, measure: Measure) -> JsonResultsMap {
     results
         .into_iter()
         .filter_map(|(scenario_name, value)| {
@@ -105,7 +105,7 @@ fn results_to_bmf(results: HashMap<String, f64>, kind: MetricKind) -> JsonResult
                 value: value.into(),
                 ..Default::default()
             };
-            metrics.insert(kind.clone(), metric);
+            metrics.insert(measure.clone(), metric);
             Some((benchmark_name, metrics))
         })
         .collect()
