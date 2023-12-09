@@ -242,8 +242,8 @@ checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
 name = "bencher_client"
-version = "0.3.21"
-source = "git+https://github.com/bencherdev/bencher?rev=3a9945f#3a9945fcbcc01e8c0b5632be71828d1481b0422e"
+version = "0.3.22"
+source = "git+https://github.com/bencherdev/bencher?rev=eb15929#eb15929ced468b16547e2682783a689b5d065ec6"
 dependencies = [
  "bencher_json",
  "chrono",
@@ -262,8 +262,8 @@ dependencies = [
 
 [[package]]
 name = "bencher_json"
-version = "0.3.21"
-source = "git+https://github.com/bencherdev/bencher?rev=3a9945f#3a9945fcbcc01e8c0b5632be71828d1481b0422e"
+version = "0.3.22"
+source = "git+https://github.com/bencherdev/bencher?rev=eb15929#eb15929ced468b16547e2682783a689b5d065ec6"
 dependencies = [
  "bencher_valid",
  "chrono",
@@ -283,8 +283,8 @@ dependencies = [
 
 [[package]]
 name = "bencher_valid"
-version = "0.3.21"
-source = "git+https://github.com/bencherdev/bencher?rev=3a9945f#3a9945fcbcc01e8c0b5632be71828d1481b0422e"
+version = "0.3.22"
+source = "git+https://github.com/bencherdev/bencher?rev=eb15929#eb15929ced468b16547e2682783a689b5d065ec6"
 dependencies = [
  "base64 0.21.5",
  "chrono",
@@ -1704,7 +1704,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.4.0"
-source = "git+https://github.com/oxidecomputer/progenitor?rev=a6bc0624803b9483983f03269533cc35db66a54b#a6bc0624803b9483983f03269533cc35db66a54b"
+source = "git+https://github.com/epompeii/progenitor?rev=39c04ebcbbd3851e42d89ab5ff1ff082982b9726#39c04ebcbbd3851e42d89ab5ff1ff082982b9726"
 dependencies = [
  "progenitor-client",
  "progenitor-impl",
@@ -1715,7 +1715,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.4.0"
-source = "git+https://github.com/oxidecomputer/progenitor?rev=a6bc0624803b9483983f03269533cc35db66a54b#a6bc0624803b9483983f03269533cc35db66a54b"
+source = "git+https://github.com/epompeii/progenitor?rev=39c04ebcbbd3851e42d89ab5ff1ff082982b9726#39c04ebcbbd3851e42d89ab5ff1ff082982b9726"
 dependencies = [
  "bytes",
  "futures-core",
@@ -1729,7 +1729,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.4.0"
-source = "git+https://github.com/oxidecomputer/progenitor?rev=a6bc0624803b9483983f03269533cc35db66a54b#a6bc0624803b9483983f03269533cc35db66a54b"
+source = "git+https://github.com/epompeii/progenitor?rev=39c04ebcbbd3851e42d89ab5ff1ff082982b9726#39c04ebcbbd3851e42d89ab5ff1ff082982b9726"
 dependencies = [
  "getopts",
  "heck",
@@ -1751,7 +1751,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.4.0"
-source = "git+https://github.com/oxidecomputer/progenitor?rev=a6bc0624803b9483983f03269533cc35db66a54b#a6bc0624803b9483983f03269533cc35db66a54b"
+source = "git+https://github.com/epompeii/progenitor?rev=39c04ebcbbd3851e42d89ab5ff1ff082982b9726#39c04ebcbbd3851e42d89ab5ff1ff082982b9726"
 dependencies = [
  "openapiv3",
  "proc-macro2",

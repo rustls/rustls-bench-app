@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use bencher_client::json::project::measure::{INSTRUCTIONS_SLUG_STR, LATENCY_SLUG_STR};
 use bencher_client::{
-    json::{DateTime, JsonMetric, JsonMetricsMap, JsonReport, JsonResultsMap, Measure},
+    json::{DateTime, JsonMetric, JsonMetricsMap, JsonResultsMap, Measure},
     types::{Adapter, JsonNewReport, JsonReportSettings},
     BencherClient,
 };
@@ -63,19 +63,15 @@ impl BencherDev {
         let project_id = self.config.project_id.clone();
         let project_id = &project_id;
         let report = &report;
-        let _: JsonReport = self
-            .client
-            .send_with(
-                |client| async move {
-                    client
-                        .proj_report_post()
-                        .project(project_id.clone())
-                        .body(report.clone())
-                        .send()
-                        .await
-                },
-                false,
-            )
+        self.client
+            .send(|client| async move {
+                client
+                    .proj_report_post()
+                    .project(project_id.clone())
+                    .body(report.clone())
+                    .send()
+                    .await
+            })
             .await?;
 
         Ok(())
