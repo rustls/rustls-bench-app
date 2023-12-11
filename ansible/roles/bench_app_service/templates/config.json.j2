@@ -1,7 +1,7 @@
 {
   "app_base_url": "https://example.com",
   "job_output_dir": "/home/{{app_user}}/server/job-output",
-  "path_to_db": ":memory:",
+  "path_to_db": "/home/{{app_user}}/server/db.sqlite3?mode=rwc",
   "webhook_secret": "{{ webhook_secret }}",
   "github_app_id": {{ github_app_id }},
   "github_app_key": "{{ github_app_key.replace('\n', '\\n') }}",
