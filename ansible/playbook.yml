@@ -1,9 +1,9 @@
 ---
 - hosts: all
   vars:
-    hostname: rustls-perf.ochagavia.nl
+    hostname: bench.rustls.dev
     app_user: ci-bench-runner
-    bench_app_repo: https://github.com/aochagavia/rustls-bench-app/
+    bench_app_repo: https://github.com/rustls/rustls-bench-app/
     bench_app_branch: main
     github_repo_owner: rustls
     github_repo_name: rustls
