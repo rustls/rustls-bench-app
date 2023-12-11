@@ -136,8 +136,8 @@ pub async fn server(
 /// Returns git commit information about the binary that is currently deployed
 async fn get_server_info() -> Json<serde_json::Value> {
     Json(json!({
-        "git_commit_sha": env!("VERGEN_GIT_SHA").to_string(),
-        "git_commit_message": env!("VERGEN_GIT_COMMIT_MESSAGE").to_string(),
+        "git_commit_sha": env!("GIT_HEAD_SHA").to_string(),
+        "git_commit_message": env!("GIT_HEAD_COMMIT_MESSAGE").to_string(),
     }))
 }
 
