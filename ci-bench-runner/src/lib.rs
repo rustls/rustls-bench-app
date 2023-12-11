@@ -23,6 +23,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use bencher_client::json::Jwt;
 use serde::Deserialize;
+use serde_json::json;
 use sqlx::migrate::Migrator;
 use sqlx::SqliteConnection;
 use tokio::sync::Mutex;
@@ -115,6 +116,7 @@ pub async fn server(
     // Set up the axum application
     let app = Router::new()
         .route("/webhooks/github", post(handle_github_webhook))
+        .route("/info", get(get_server_info))
         .route("/jobs/:id", get(get_job_view))
         .route(
             "/comparisons/:commits/cachegrind-diff/:scenario",
@@ -129,6 +131,14 @@ pub async fn server(
 
     info!("listening on port {}", addr.port());
     Ok((server, addr))
+}
+
+/// Returns git commit information about the binary that is currently deployed
+async fn get_server_info() -> Json<serde_json::Value> {
+    Json(json!({
+        "git_commit_sha": env!("VERGEN_GIT_SHA").to_string(),
+        "git_commit_message": env!("VERGEN_GIT_COMMIT_MESSAGE").to_string(),
+    }))
 }
 
 /// Returns information about the job
