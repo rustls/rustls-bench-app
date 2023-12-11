@@ -47,7 +47,7 @@ too old.
 
 - Setup everything from scratch and deploy: `ansible-playbook playbook.yml`
 - Update Rust to the latest stable version: `ansible-playbook playbook.yml --tags rustup`
-- Deploy a new version of the server: `ansible-playbook playbook.yml --tags deploy`
+- Deploy a new version of the server: `ansible-playbook playbook.yml --tags build-and-deploy`
 - Check the status of the application: `sudo systemctl status ci-bench-runner`
 
 ## Testing
