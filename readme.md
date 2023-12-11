@@ -60,8 +60,8 @@ The following features are supported:
   For security, comparison bench runs are only triggered in the following scenarios:
   - A PR is created or updated and the head branch lives in the rustls repository.
   - A maintainer leaves a GitHub review approving the PR.
-  - A maintainer posts a comment to the PR including `@rustls-bench bench` as part of the body. This
-    can be used as a fallback mechanism when the triggers mentioned above are not enough.
+  - A maintainer posts a comment to the PR including `@rustls-benchmarking bench` as part of the
+    body. This can be used as a fallback mechanism when the triggers mentioned above are not enough.
 - Report comparison results in a comment to the relevant PR, reusing the same comment when new
   results are available.
 
