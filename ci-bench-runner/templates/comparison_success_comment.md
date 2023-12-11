@@ -27,7 +27,7 @@ _There are no significant instruction count differences_
 
 #### Other differences
 
-{% if icount.significant_diffs.is_empty() %}
+{% if icount.negligible_diffs.is_empty() %}
 
 _There are no other instruction count differences_
 
