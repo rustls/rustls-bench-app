@@ -41,7 +41,7 @@ static ALLOWED_AUTHOR_ASSOCIATIONS: &[&str] = &[
 /// - Has just been created (edits are ignored);
 /// - Has been posted to a PR (not to an issue);
 /// - Has been posted by an authorized user; and
-/// - Addresses the bot with the right command (`@rustls-bench bench`).
+/// - Addresses the bot with the right command (`@APP_NAME bench`).
 pub async fn handle_issue_comment(ctx: JobContext<'_>) -> anyhow::Result<()> {
     // Ideally, we'd use WebhookEvent::try_from_header_and_body from `octocrab`, but it doesn't have
     // the `author_association` field on the comment, which we need.
@@ -77,7 +77,7 @@ pub async fn handle_issue_comment(ctx: JobContext<'_>) -> anyhow::Result<()> {
     }
 
     let octocrab = ctx.octocrab.cached();
-    if body.contains("@rustls-bench bench") {
+    if body.contains(&format!("@{APP_NAME} bench")) {
         let pr = octocrab
             .pulls(&ctx.config.github_repo_owner, &ctx.config.github_repo_name)
             .get(payload.issue.number)
@@ -86,17 +86,19 @@ pub async fn handle_issue_comment(ctx: JobContext<'_>) -> anyhow::Result<()> {
 
         let branches = pr_branches(&pr).ok_or(anyhow!("unable to get PR branch details"))?;
         bench_pr(ctx, pr.number, branches).await
-    } else if body.contains("@rustls-bench") {
-        trace!("the comment was addressed at rustls-bench, but it is an unknown command!");
-        let comment = "Unrecognized command. Available commands are:\n\
-        * `@rustls-bench bench`: runs the instruction count benchmarks and reports the results";
+    } else if body.contains(&format!("@{APP_NAME}")) {
+        trace!("the comment was addressed at the application, but it is an unknown command!");
+        let comment = format!(
+            "Unrecognized command. Available commands are:\n\
+        * `@{APP_NAME} bench`: runs the instruction count benchmarks and reports the results"
+        );
         octocrab
             .issues(&ctx.config.github_repo_owner, &ctx.config.github_repo_name)
             .create_comment(payload.issue.number, comment)
             .await?;
         Ok(())
     } else {
-        trace!("the comment was not addressed at rustls-bench");
+        trace!("the comment was not addressed at the application");
         Ok(())
     }
 }
@@ -740,6 +742,7 @@ static DEFAULT_ICOUNT_NOISE_THRESHOLD: f64 = 0.002; // 0.2%
 static MINIMUM_ICOUNT_NOISE_THRESHOLD: f64 = 0.002; // 0.2%
 static DEFAULT_WALLTIME_NOISE_THRESHOLD: f64 = 0.05; // 5%
 static MINIMUM_WALLTIME_NOISE_THRESHOLD: f64 = 0.01; // 1%
+static APP_NAME: &str = "rustls-benchmarking";
 
 /// Functions inside this module will be available as askama filters
 mod filters {

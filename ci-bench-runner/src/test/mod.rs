@@ -186,7 +186,7 @@ async fn test_issue_comment_unauthorized_user() {
 
     // Post the webhook event
     let client = reqwest::Client::default();
-    let event = webhook::comment("@rustls-bench bench", "created", "NONE");
+    let event = webhook::comment("@rustls-benchmarking bench", "created", "NONE");
     post_webhook(
         &client,
         &server.base_url,
@@ -211,7 +211,7 @@ async fn test_issue_comment_edited() {
 
     // Post the webhook event
     let client = reqwest::Client::default();
-    let event = webhook::comment("@rustls-bench bench", "edit", "OWNER");
+    let event = webhook::comment("@rustls-benchmarking bench", "edit", "OWNER");
     post_webhook(
         &client,
         &server.base_url,
@@ -239,7 +239,7 @@ async fn test_issue_comment_happy_path() {
 
     // Post the webhook event
     let client = reqwest::Client::default();
-    let event = webhook::comment("@rustls-bench bench", "created", "OWNER");
+    let event = webhook::comment("@rustls-benchmarking bench", "created", "OWNER");
     post_webhook(
         &client,
         &server.base_url,
