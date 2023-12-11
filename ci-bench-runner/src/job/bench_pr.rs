@@ -293,14 +293,12 @@ async fn bench_pr_and_cache_results(
         .iter()
         .filter(|r| r.scenario_kind == ScenarioKind::Icount)
         .cloned();
-    let icount_significance_thresholds =
-        calculate_significance_thresholds(icount_results, DEFAULT_ICOUNT_NOISE_THRESHOLD);
+    let icount_significance_thresholds = calculate_significance_thresholds(icount_results);
 
     let walltime_results = historical_results
         .into_iter()
         .filter(|r| r.scenario_kind == ScenarioKind::Walltime);
-    let walltime_significance_thresholds =
-        calculate_significance_thresholds(walltime_results, DEFAULT_WALLTIME_NOISE_THRESHOLD);
+    let walltime_significance_thresholds = calculate_significance_thresholds(walltime_results);
 
     let significance_thresholds = SignificanceThresholds {
         icount: icount_significance_thresholds,
@@ -433,9 +431,12 @@ fn compare_refs(
     })
 }
 
+/// Returns the calculated significance threshold for each scenario
+///
+/// Scenarios with less than 10 results will be skipped. It is the responsibility of the caller to
+/// handle missing significance thresholds, and to clamp them to a minimum value.
 pub fn calculate_significance_thresholds(
     historical_results: impl Iterator<Item = BenchResult>,
-    minimum_threshold: f64,
 ) -> HashMap<String, f64> {
     let mut results_by_name = HashMap::new();
     for result in historical_results {
@@ -445,7 +446,7 @@ pub fn calculate_significance_thresholds(
             .push(result.result);
     }
 
-    let mut outlier_bounds = HashMap::with_capacity(results_by_name.len());
+    let mut significance_thresholds = HashMap::with_capacity(results_by_name.len());
     for (name, results) in results_by_name {
         // Ensure we have at least 10 results available
         if results.len() < 10 {
@@ -466,11 +467,11 @@ pub fn calculate_significance_thresholds(
         let q3 = historic_changes[(historic_changes.len() * 3) / 4];
         let iqr = q3 - q1;
         let iqr_multiplier = 3.0;
-        let significance_threshold = f64::max(q3 + iqr * iqr_multiplier, minimum_threshold);
-        outlier_bounds.insert(name, significance_threshold);
+        let significance_threshold = q3 + iqr * iqr_multiplier;
+        significance_thresholds.insert(name, significance_threshold);
     }
 
-    outlier_bounds
+    significance_thresholds
 }
 
 struct SignificanceThresholds {
@@ -832,14 +833,13 @@ mod test {
     }
 
     #[test]
-    fn calculate_outlier_bounds_not_enough_results() {
-        let thresholds =
-            calculate_significance_thresholds(std::iter::empty(), MINIMUM_ICOUNT_NOISE_THRESHOLD);
+    fn calculate_significance_thresholds_not_enough_results() {
+        let thresholds = calculate_significance_thresholds(std::iter::empty());
         assert_eq!(thresholds.len(), 0);
     }
 
     #[test]
-    fn calculate_outlier_bounds_many_results() {
+    fn calculate_significance_thresholds_many_results() {
         let historical_results = vec![
             100.0, 97.0, 98.0, 101.0, 100.0, 99.0, 97.0, 102.0, 99.0, 98.0,
         ];
@@ -849,26 +849,57 @@ mod test {
             scenario_kind: ScenarioKind::Icount,
             result,
         });
-        let thresholds =
-            calculate_significance_thresholds(bench_results, MINIMUM_ICOUNT_NOISE_THRESHOLD);
+        let thresholds = calculate_significance_thresholds(bench_results);
 
         assert_eq!(thresholds.len(), 1);
         assert_eq!((thresholds["foo"] * 100.0).round(), 9.0);
     }
 
     #[test]
-    fn calculate_outlier_bounds_minimal() {
-        let bench_results = std::iter::repeat(1000.0)
-            .take(10)
-            .map(|result| BenchResult {
-                scenario_name: "foo".to_string(),
-                scenario_kind: ScenarioKind::Icount,
-                result,
-            });
-        let thresholds =
-            calculate_significance_thresholds(bench_results, MINIMUM_ICOUNT_NOISE_THRESHOLD);
+    fn compare_results_with_different_thresholds() {
+        let baseline = HashMap::from([
+            ("foo".to_string(), 42.0),
+            ("bar".to_string(), 42.0),
+            ("baz".to_string(), 42.0),
+        ]);
+        let candidate = HashMap::from([
+            ("foo".to_string(), 40.0),
+            ("bar".to_string(), 42.0),
+            ("baz".to_string(), 42.0),
+        ]);
+        let thresholds = HashMap::from([("foo".to_string(), 0.005), ("baz".to_string(), 0.02)]);
+        let (diffs, missing) = compare_results(
+            Path::new("dummy"),
+            &baseline,
+            &candidate,
+            &thresholds,
+            ScenarioKind::Walltime,
+            DEFAULT_WALLTIME_NOISE_THRESHOLD,
+            MINIMUM_WALLTIME_NOISE_THRESHOLD,
+        )
+        .unwrap();
 
-        assert_eq!(thresholds.len(), 1);
-        assert_eq!(thresholds["foo"], DEFAULT_ICOUNT_NOISE_THRESHOLD);
+        assert_eq!(missing.len(), 0);
+        assert_eq!(diffs.len(), 3);
+
+        let diffs: HashMap<_, _> = diffs
+            .into_iter()
+            .map(|d| (d.scenario_name.clone(), d))
+            .collect();
+
+        // The significance threshold was clamped to the minimum threshold
+        assert_eq!(
+            diffs["foo"].significance_threshold,
+            MINIMUM_WALLTIME_NOISE_THRESHOLD
+        );
+
+        // No significance threshold for this one, so the default was used
+        assert_eq!(
+            diffs["bar"].significance_threshold,
+            DEFAULT_WALLTIME_NOISE_THRESHOLD
+        );
+
+        // Significance threshold was above minimum, so it was unchanged
+        assert_eq!(diffs["baz"].significance_threshold, 0.02);
     }
 }
