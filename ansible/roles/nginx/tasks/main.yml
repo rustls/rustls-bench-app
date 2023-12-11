@@ -8,10 +8,14 @@
       - cron
     state: present
 - name: Allow incoming HTTP(S) traffic
+  become: true
+  become_user: root
   community.general.ufw:
     rule: allow
     name: Nginx Full
 - name: Get certificate for the first time
+  become: true
+  become_user: root
   ansible.builtin.command: certbot -n --nginx certonly -d {{ hostname }} --agree-tos --email {{ letsencrypt_email }}
   args:
     creates: /etc/letsencrypt/live/{{ hostname }}
@@ -20,6 +24,8 @@
     path: /etc/nginx/sites-enabled/default
     state: absent
 - name: Add nginx configuration
+  become: true
+  become_user: root
   ansible.builtin.template:
     src: hostname.conf
     dest: /etc/nginx/sites-enabled/{{ hostname }}.conf
