@@ -38,6 +38,8 @@
     state: reloaded
     enabled: true
 - name: Setup cronjob for certificate renewal
+  become: true
+  become_user: root
   ansible.builtin.cron:
     name: certbot-renewal
     job: /bin/bash -lc 'certbot -q renew'
