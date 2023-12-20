@@ -12,6 +12,7 @@ hex = "0.4.3"
 hmac = "0.12.1"
 hyper = { version = "0.14.27", default-features = false }
 jsonwebtoken = "9.1.0"
+notify = "6.1.1"
 octocrab = "0.32.0"
 sentry = { version = "0.31.7", features = ["tracing", "ureq", "rustls"], default-features = false }
 sentry-tracing = "0.31.7"
@@ -29,5 +30,6 @@ uuid = { version = "1.4.1", features = ["v4", "serde"] }
 
 [dev-dependencies]
 ctor = "0.2.5"
+libc = "0.2.151"
 reqwest = { version = "0.11.22", default-features = false, features = ["rustls-tls-webpki-roots"] }
 wiremock = "0.5.19"
