@@ -1,9 +1,11 @@
 use std::fmt::{Debug, Formatter};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use anyhow::Context;
 use axum::body::Bytes;
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -25,6 +27,11 @@ pub struct EventQueue {
     active_job_id: Arc<Mutex<Option<Uuid>>>,
     /// A sender indicating that a new event has been enqueued
     event_enqueued_tx: UnboundedSender<()>,
+    /// Keeps track of whether incoming events should be processed.
+    ///
+    /// Note: when event processing gets disabled, we still let the currently active job run to
+    /// completion.
+    process_events_toggler: ProcessEventsToggler,
     /// Database handle, used to persist events and recover in case of crashes
     db: Db,
     /// Bencher.dev client
@@ -42,22 +49,24 @@ impl EventQueue {
         db: Db,
         bench_runner: Arc<dyn BenchRunner>,
         octocrab: CachedOctocrab,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let (worker_tx, event_enqueued_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let queue = Self {
             active_job_id: Arc::new(Mutex::new(None)),
             event_enqueued_tx: worker_tx,
+            process_events_toggler: ProcessEventsToggler::new()
+                .context("failed to initialize ProcessEventsToggler")?,
             db,
             bencher_dev: config.bencher.clone().map(BencherDev::new),
         };
 
-        queue.start_and_supervise_queue_processing(
+        Ok(queue.start_and_supervise_queue_processing(
             event_enqueued_rx,
             config,
             bench_runner,
             octocrab,
-        )
+        ))
     }
 
     /// Starts and supervises the background queue processing task
@@ -71,11 +80,14 @@ impl EventQueue {
         let active_job_id = self.active_job_id.clone();
         let queue = self.clone();
         let event_enqueued_rx = Arc::new(tokio::sync::Mutex::new(event_enqueued_rx));
+        let toggler = self.process_events_toggler.clone();
+
         tokio::spawn(async move {
             loop {
                 let background_task = queue.process_queued_events_in_background(
                     event_enqueued_rx.clone(),
                     config.clone(),
+                    toggler.clone(),
                     bench_runner.clone(),
                     octocrab.clone(),
                 );
@@ -118,6 +130,7 @@ impl EventQueue {
         &self,
         event_enqueued_rx: Arc<tokio::sync::Mutex<UnboundedReceiver<()>>>,
         config: Arc<AppConfig>,
+        mut toggler: ProcessEventsToggler,
         bench_runner: Arc<dyn BenchRunner>,
         octocrab: CachedOctocrab,
     ) -> JoinHandle<anyhow::Result<()>> {
@@ -140,7 +153,10 @@ impl EventQueue {
                     break;
                 }
 
-                // Now get it from the database
+                // Postpone event processing if requested
+                toggler.wait_for_processing_enabled().await;
+
+                // Get the next event from the database
                 let event = db.next_queued_event().await?;
 
                 let Some(github_event) = AllowedEvent::from_event_string(&event.event) else {
@@ -220,6 +236,16 @@ impl EventQueue {
         self.event_enqueued_tx.send(())?;
 
         Ok(Some(event_id))
+    }
+
+    /// Returns the active job's id, if there is an active job
+    pub fn active_job_id(&self) -> Option<Uuid> {
+        *self.active_job_id.lock().unwrap()
+    }
+
+    /// Returns whether event processing is currently enabled
+    pub fn event_processing_enabled(&self) -> bool {
+        self.process_events_toggler.processing_enabled()
     }
 
     /// Returns a user-facing view of the given job id, or `None` if the job could not be found
@@ -319,4 +345,87 @@ pub enum JobStatus {
     Pending,
     Success,
     Failure,
+}
+
+/// Watches the filesystem to toggle event processing.
+///
+/// Event processing is enabled by default, but can be disabled by creating a file called `pause`
+/// in the program's working directory. If the file is present upon startup or gets created while
+/// the application runs, processing will be disabled until the file is deleted.
+struct ProcessEventsToggler {
+    /// Filesystem watcher
+    watcher: Arc<RecommendedWatcher>,
+    /// Receiver tracking the current state of the toggle (enabled / disabled)
+    processing_enabled_rx: tokio::sync::watch::Receiver<bool>,
+}
+
+impl ProcessEventsToggler {
+    fn new() -> anyhow::Result<Self> {
+        let pause_file_path = Path::new("pause");
+        let process_events = pause_file_path.try_exists().ok() != Some(true);
+        let (processing_enabled_tx, processing_enabled_rx) =
+            tokio::sync::watch::channel(process_events);
+
+        let mut watcher =
+            notify::recommended_watcher(move |r: notify::Result<notify::Event>| match r {
+                Ok(event) => {
+                    if event
+                        .paths
+                        .iter()
+                        .any(|p| p.file_name() == Some(pause_file_path.as_os_str()))
+                    {
+                        match event.kind {
+                            EventKind::Create(_) => {
+                                info!("event processing disabled");
+                                processing_enabled_tx.send_replace(false);
+                            }
+                            EventKind::Remove(_) => {
+                                info!("event processing enabled");
+                                processing_enabled_tx.send_replace(true);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Err(e) => error!("error watching pause file: {:?}", e),
+            })?;
+
+        let watched_path = Path::new(".");
+        info!(
+            "watching for file creation/deletion under {}",
+            watched_path.canonicalize()?.display()
+        );
+        watcher.watch(watched_path, RecursiveMode::NonRecursive)?;
+
+        Ok(ProcessEventsToggler {
+            watcher: Arc::new(watcher),
+            processing_enabled_rx,
+        })
+    }
+
+    fn processing_enabled(&self) -> bool {
+        *self.processing_enabled_rx.borrow()
+    }
+
+    fn processing_disabled(&self) -> bool {
+        !self.processing_enabled()
+    }
+
+    async fn wait_for_processing_enabled(&mut self) {
+        if self.processing_disabled() {
+            info!("event handling postponed until processing gets enabled");
+        }
+
+        self.processing_enabled_rx.wait_for(|&b| b).await.unwrap();
+        assert!(*self.processing_enabled_rx.borrow());
+    }
+}
+
+impl Clone for ProcessEventsToggler {
+    fn clone(&self) -> Self {
+        Self {
+            watcher: self.watcher.clone(),
+            processing_enabled_rx: self.processing_enabled_rx.clone(),
+        }
+    }
 }

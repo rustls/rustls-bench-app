@@ -64,6 +64,10 @@ The following features are supported:
     body. This can be used as a fallback mechanism when the triggers mentioned above are not enough.
 - Report comparison results in a comment to the relevant PR, reusing the same comment when new
   results are available.
+- Pause event processing by creating a file called `pause` in the application's working directory.
+- Show information about the application through the `/info` endpoint. Includes the hash of the
+  deployed commit, the id of the active job (if any) and whether event processing is currently
+  enabled.
 
 Interesting ideas for later:
 

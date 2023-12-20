@@ -104,7 +104,7 @@ pub async fn server(
     // Set up dependencies
     let octocrab = CachedOctocrab::new(&config).await?;
     let db = Db::with_connection(sqlite);
-    let event_queue = EventQueue::new(config.clone(), db.clone(), bench_runner, octocrab);
+    let event_queue = EventQueue::new(config.clone(), db.clone(), bench_runner, octocrab)?;
 
     // Create the application's state, accessible when handling requests
     let state = Arc::new(AppState {
@@ -134,10 +134,12 @@ pub async fn server(
 }
 
 /// Returns git commit information about the binary that is currently deployed
-async fn get_server_info() -> Json<serde_json::Value> {
+async fn get_server_info(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     Json(json!({
         "git_commit_sha": env!("GIT_HEAD_SHA").to_string(),
         "git_commit_message": env!("GIT_HEAD_COMMIT_MESSAGE").to_string(),
+        "active_job_id": state.event_queue.active_job_id(),
+        "event_processing_enabled": state.event_queue.event_processing_enabled(),
     }))
 }
 

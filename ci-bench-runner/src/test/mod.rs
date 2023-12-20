@@ -1,4 +1,5 @@
 use std::fs;
+use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -256,6 +257,79 @@ async fn test_issue_comment_happy_path() {
 
     // Assert that the mocks were used and report any errors
     mock_github.server.verify().await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn test_issue_comment_postponed_processing() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let client = reqwest::Client::default();
+
+    // This is necessary to create a "pause" file without interfering with other tests
+    // See https://stackoverflow.com/a/73867506/2110623 for details on `unshare`
+    unsafe { libc::unshare(libc::CLONE_FS) };
+    std::env::set_current_dir(tempdir.path()).unwrap();
+
+    // Mock HTTP responses from GitHub
+    let mock_github = MockGitHub::start().await;
+    let _get_pr = mock_github.mock_get_pr().await;
+    let _post_comment = mock_github.mock_post_comment().await;
+    let update_status = mock_github.mock_post_status().await;
+
+    // Run the job server
+    let server = TestServer::start(&mock_github).await;
+
+    // Sanity check: event processing is enabled
+    let response = get_info(&client, &server.base_url).await;
+    assert_eq!(
+        response.get("event_processing_enabled"),
+        Some(&serde_json::Value::Bool(true))
+    );
+
+    // Disable event processing
+    let pause_file_path = tempdir.path().join("pause");
+    File::create(&pause_file_path).unwrap();
+
+    // Post the webhook event
+    let event = webhook::comment("@rustls-benchmarking bench", "created", "OWNER");
+    post_webhook(
+        &client,
+        &server.base_url,
+        &server.config.webhook_secret,
+        event,
+        "issue_comment",
+    )
+    .await;
+
+    // Ensure there is no active job after one second and event processing is disabled
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let response = get_info(&client, &server.base_url).await;
+    assert_eq!(
+        response.get("active_job_id"),
+        Some(&serde_json::Value::Null)
+    );
+    assert_eq!(
+        response.get("event_processing_enabled"),
+        Some(&serde_json::Value::Bool(false))
+    );
+
+    // Re-enable event processing
+    fs::remove_file(&pause_file_path).unwrap();
+
+    // Wait for our mock endpoints to have been called
+    tokio::time::timeout(Duration::from_secs(5), update_status.wait_until_satisfied())
+        .await
+        .ok();
+
+    // Assert that the mocks were used and report any errors
+    mock_github.server.verify().await;
+
+    // Sanity check: event processing is enabled
+    let response = get_info(&client, &server.base_url).await;
+    assert_eq!(
+        response.get("event_processing_enabled"),
+        Some(&serde_json::Value::Bool(true))
+    );
 }
 
 #[tokio::test]
@@ -683,6 +757,17 @@ async fn post_webhook(
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+async fn get_info(client: &reqwest::Client, base_url: &str) -> serde_json::Value {
+    client
+        .get(format!("{base_url}/info"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
 }
 
 async fn ensure_webhook_handled(server: &TestServer) {
