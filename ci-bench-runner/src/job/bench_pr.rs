@@ -628,6 +628,8 @@ pub fn cachegrind_diff(job_output_path: &Path, scenario: &str) -> anyhow::Result
         // _ZN9hashbrown3raw21RawTable$LT$T$C$A$GT$14reserve_rehash17hc60392f3f3eac4b2E.llvm.9716880419886440089 ->
         // _ZN9hashbrown3raw21RawTable$LT$T$C$A$GT$14reserve_rehashE
         .arg("--mod-funcname=s/17h[0-9a-f]+E\\.llvm\\.\\d+/E/")
+        // remove the leading path, which is unique for each checkout of the repository (we replace it by `rustls`)
+        .arg("--mod-filename=s/.+\\/(target\\/release\\/build.+)/rustls\\/\\1/")
         .arg(baseline_cachegrind_file_path)
         .arg(candidate_cachegrind_file_path)
         .stdout(Stdio::from(diff_file))
