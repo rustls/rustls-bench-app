@@ -79,8 +79,8 @@ mod webhook {
     }
 }
 
-mod cachegrind {
-    pub static SAMPLE_OUTPUT: &str = include_str!("data/cachegrind_outputs/sample");
+mod callgrind {
+    pub static SAMPLE_OUTPUT: &str = include_str!("data/callgrind_outputs/sample");
 }
 
 struct MockBenchRunner {
@@ -134,14 +134,11 @@ impl BenchRunner for MockBenchRunner {
         // Fake icounts
         fs::write(results_dir.join("icounts.csv"), "fake_bench,12345")?;
 
-        // Fake cachegrind output
-        let cachegrind_dir = results_dir.join("cachegrind");
-        fs::create_dir(&cachegrind_dir)?;
-        fs::write(
-            cachegrind_dir.join("calibration"),
-            cachegrind::SAMPLE_OUTPUT,
-        )?;
-        fs::write(cachegrind_dir.join("fake_bench"), cachegrind::SAMPLE_OUTPUT)?;
+        // Fake callgrind output
+        let callgrind_dir = results_dir.join("callgrind");
+        fs::create_dir(&callgrind_dir)?;
+        fs::write(callgrind_dir.join("calibration"), callgrind::SAMPLE_OUTPUT)?;
+        fs::write(callgrind_dir.join("fake_bench"), callgrind::SAMPLE_OUTPUT)?;
 
         // Fake walltimes
         fs::write(

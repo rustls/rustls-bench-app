@@ -2,10 +2,9 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::fs;
-use std::fs::File;
 use std::ops::Deref;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use anyhow::{anyhow, bail, Context};
 use askama::Template;
@@ -554,7 +553,7 @@ fn compare_results(
         };
 
         let cachegrind_diff = if scenario_kind == ScenarioKind::Icount {
-            Some(cachegrind_diff(job_output_path, scenario)?)
+            Some(callgrind_diff(job_output_path, scenario)?)
         } else {
             None
         };
@@ -604,68 +603,56 @@ fn split_on_threshold(diffs: Vec<ScenarioDiff>) -> (Vec<ScenarioDiff>, Vec<Scena
 }
 
 /// Returns the detailed instruction diff between the baseline and the candidate
-pub fn cachegrind_diff(job_output_path: &Path, scenario: &str) -> anyhow::Result<String> {
-    // The latest version of valgrind has deprecated cg_diff, which has been superseded by
-    // cg_annotate. Many systems are running older versions, though, so we are sticking with cg_diff
-    // for the time being.
-
-    let diffs_path = job_output_path.join("diffs");
-    fs::create_dir_all(&diffs_path).context("failed to create dir for cg_diff output")?;
-
-    let baseline_cachegrind_file_path = job_output_path
-        .join("base/results/cachegrind")
-        .join(scenario);
-    let candidate_cachegrind_file_path = job_output_path
-        .join("candidate/results/cachegrind")
-        .join(scenario);
-    let diff_file_path = diffs_path.join(scenario);
-
-    // cg_diff generates a diff between two cachegrind output files in a custom format that is not
-    // user-friendly
-    let diff_file = File::create(&diff_file_path).context("cannot create temp file for cg_diff")?;
-    let cg_diff = Command::new("cg_diff")
-        // remove per-compilation uniqueness in symbols, eg
-        // _ZN9hashbrown3raw21RawTable$LT$T$C$A$GT$14reserve_rehash17hc60392f3f3eac4b2E.llvm.9716880419886440089 ->
-        // _ZN9hashbrown3raw21RawTable$LT$T$C$A$GT$14reserve_rehashE
-        .arg("--mod-funcname=s/17h[0-9a-f]+E\\.llvm\\.\\d+/E/")
-        // remove the leading path, which is unique for each checkout of the repository (we replace it by `rustls`)
-        .arg("--mod-filename=s/.+\\/(target\\/release\\/build.+)/rustls\\/\\1/")
-        .arg(baseline_cachegrind_file_path)
-        .arg(candidate_cachegrind_file_path)
-        .stdout(Stdio::from(diff_file))
-        .spawn()
-        .context("cannot spawn cg_diff subprocess")?
-        .wait()
-        .context("error waiting for cg_diff to finish")?;
-
-    if !cg_diff.success() {
-        bail!(
-            "cg_diff finished with an error (code = {:?})",
-            cg_diff.code()
+pub fn callgrind_diff(job_output_path: &Path, scenario: &str) -> anyhow::Result<String> {
+    // callgrind_annotate formats the callgrind output file, suitable for comparison with
+    // callgrind_differ
+    let callgrind_annotate_base = Command::new("callgrind_annotate")
+        .arg(
+            job_output_path
+                .join("base/results/callgrind")
+                .join(scenario),
         )
-    }
-
-    // cg_annotate transforms the output of cg_diff into something a user can understand
-    let cg_annotate = Command::new("cg_annotate")
-        .arg(diff_file_path)
+        // do not annotate source, to keep output compact
         .arg("--auto=no")
         .output()
-        .context("error waiting for cg_annotate to finish")?;
+        .context("error waiting for callgrind_annotate to finish")?;
 
-    let stdout =
-        String::from_utf8(cg_annotate.stdout).context("cg_annotate produced invalid UTF8")?;
+    let callgrind_annotate_candidate = Command::new("callgrind_annotate")
+        .arg(
+            job_output_path
+                .join("candidate/results/callgrind")
+                .join(scenario),
+        )
+        // do not annotate source, to keep output compact
+        .arg("--auto=no")
+        .output()
+        .context("error waiting for callgrind_annotate to finish")?;
 
-    if !cg_annotate.status.success() {
-        let stderr =
-            String::from_utf8(cg_annotate.stderr).context("cg_annotate produced invalid UTF8")?;
-
-        bail!(
-            "cg_annotate finished with an error (code = {:?}). Stdout:\n{stdout}\nStderr:\n{stderr}",
-            cg_annotate.status.code()
+    if !callgrind_annotate_base.status.success() {
+        anyhow::bail!(
+            "callgrind_annotate for base finished with an error (code = {:?})",
+            callgrind_annotate_base.status.code()
         )
     }
 
-    Ok(stdout)
+    if !callgrind_annotate_candidate.status.success() {
+        anyhow::bail!(
+            "callgrind_annotate for candidate finished with an error (code = {:?})",
+            callgrind_annotate_candidate.status.code()
+        )
+    }
+
+    let string_base = String::from_utf8(callgrind_annotate_base.stdout)
+        .context("callgrind_annotate produced invalid UTF8")?;
+    let string_candidate = String::from_utf8(callgrind_annotate_candidate.stdout)
+        .context("callgrind_annotate produced invalid UTF8")?;
+
+    // TODO: reinstate actual diffing, using `callgrind_differ` crate
+    Ok(format!(
+        "Base output:\n{string_base}\n\
+         =====\n\n\
+         Candidate output:\n{string_candidate}\n"
+    ))
 }
 
 #[derive(Template)]
