@@ -11,6 +11,6 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Run ansible-lint
         run: nix develop --command bash -c "cd ansible && ansible-lint"

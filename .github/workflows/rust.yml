@@ -12,7 +12,7 @@ jobs:
       run:
         working-directory: ci-bench-runner
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -28,7 +28,7 @@ jobs:
         working-directory: ci-bench-runner
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -43,7 +43,7 @@ jobs:
         working-directory: ci-bench-runner
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: cargo doc
@@ -58,7 +58,7 @@ jobs:
       run:
         working-directory: ci-bench-runner
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Install stable rust toolchain
       uses: dtolnay/rust-toolchain@stable
     - name: Install valgrind
