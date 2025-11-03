@@ -146,6 +146,12 @@ impl BenchRunner for MockBenchRunner {
             "fake_walltime_bench,12345,12432,12211",
         )?;
 
+        // Fake memory
+        fs::write(
+            results_dir.join("memory.csv"),
+            "fake_memory_bench,11197667,2653,599466,199",
+        )?;
+
         // Notify any watchers of this call
         self.runs_tx
             .send(MockBenchRun {
@@ -483,6 +489,11 @@ async fn test_pr_synchronize_cached() {
                     diffs: Vec::new(),
                     memory_details: None,
                 },
+                memory: ComparisonSubResult {
+                    scenarios_missing_in_baseline: vec![],
+                    diffs: Vec::new(),
+                    memory_details: None,
+                },
             },
         )
         .await
@@ -664,6 +675,11 @@ async fn test_get_cachegrind_diff() {
                 walltime: ComparisonSubResult {
                     scenarios_missing_in_baseline: vec!["bar".to_string()],
                     diffs: Vec::new(),
+                    memory_details: None,
+                },
+                memory: ComparisonSubResult {
+                    diffs: vec![],
+                    scenarios_missing_in_baseline: vec![],
                     memory_details: None,
                 },
             },

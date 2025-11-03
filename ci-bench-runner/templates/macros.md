@@ -54,6 +54,25 @@ The following benchmark scenarios are present in the candidate but not in the ba
 {%- endmacro -%}
 
 
+{%- macro memory_table(diffs, details, use_emoji) -%}
+
+| Scenario | Baseline | Candidate | Diff | Threshold |
+| --- | ---: | ---: | ---: | ---: |
+{% for diff in diffs %}
+{%- let emoji -%}
+{%- if use_emoji && diff.diff() > 0.0 -%}
+{%- let emoji = "⚠️ " -%}
+{%- else if use_emoji && diff.diff() < 0.0 -%}
+{%- let emoji = "✅ " -%}
+{%- else -%}
+{%- let emoji = "" -%}
+{%- endif -%}
+| {{ diff.scenario_name }} | {{ diff.baseline_memory(details) }} | {{ diff.candidate_memory(details) }} | {{emoji}}{{ diff.memory_diff(details) }} ({{ "{:.2}%"|format(diff.diff_ratio() * 100.0) }}) | {{ "{:.2}%"|format(diff.significance_threshold * 100.0) }} |
+{% endfor %}
+
+{%- endmacro -%}
+
+
 {%- macro checkout_details(branches) -%}
 
 Checkout details:

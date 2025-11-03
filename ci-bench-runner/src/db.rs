@@ -87,6 +87,8 @@ pub struct ComparisonResult {
     pub icount: ComparisonSubResult,
     /// Result for the walltime benchmarks
     pub walltime: ComparisonSubResult,
+    /// Result for the memory benchmarks
+    pub memory: ComparisonSubResult,
 }
 
 #[derive(Debug, Clone)]
@@ -128,12 +130,46 @@ impl ScenarioDiff {
     pub fn diff_ratio(&self) -> f64 {
         self.diff() / self.baseline_result
     }
+
+    pub(crate) fn baseline_memory(
+        &self,
+        details: &Option<HashMap<String, (MemoryDetails, MemoryDetails)>>,
+    ) -> String {
+        let Some(detail) = details.as_ref().and_then(|m| m.get(&self.scenario_name)) else {
+            return String::new();
+        };
+
+        detail.0.to_string()
+    }
+
+    pub(crate) fn candidate_memory(
+        &self,
+        details: &Option<HashMap<String, (MemoryDetails, MemoryDetails)>>,
+    ) -> String {
+        let Some(detail) = details.as_ref().and_then(|m| m.get(&self.scenario_name)) else {
+            return String::new();
+        };
+
+        detail.1.to_string()
+    }
+
+    pub(crate) fn memory_diff(
+        &self,
+        details: &Option<HashMap<String, (MemoryDetails, MemoryDetails)>>,
+    ) -> String {
+        let Some(detail) = details.as_ref().and_then(|m| m.get(&self.scenario_name)) else {
+            return String::new();
+        };
+
+        detail.0.diff_string(detail.1)
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ScenarioKind {
     Icount = 0,
     Walltime = 1,
+    Memory = 2,
 }
 
 impl TryFrom<i64> for ScenarioKind {
@@ -143,6 +179,7 @@ impl TryFrom<i64> for ScenarioKind {
         match value {
             0 => Ok(Self::Icount),
             1 => Ok(Self::Walltime),
+            2 => Ok(Self::Memory),
             kind => bail!("invalid scenario kind: {kind}"),
         }
     }
@@ -387,6 +424,7 @@ impl Db {
         let icount_scenarios_missing = to_json_array(&result.icount.scenarios_missing_in_baseline);
         let walltime_scenarios_missing =
             to_json_array(&result.walltime.scenarios_missing_in_baseline);
+        let memory_scenarios_missing = to_json_array(&result.memory.scenarios_missing_in_baseline);
 
         let mut conn = self.sqlite.lock().await;
         let id = conn.transaction(|t| {
@@ -395,7 +433,7 @@ impl Db {
                 let id = Uuid::new_v4();
                 let now = OffsetDateTime::now_utc();
                 sqlx::query(
-                    "INSERT INTO comparison_runs (id, created_utc, baseline_commit, candidate_commit, icount_scenarios_missing_in_baseline, walltime_scenarios_missing_in_baseline) VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO comparison_runs (id, created_utc, baseline_commit, candidate_commit, icount_scenarios_missing_in_baseline, walltime_scenarios_missing_in_baseline, memory_scenarios_missing_in_baseline) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 )
                     .bind(id.as_bytes().as_slice())
                     .bind(now)
@@ -403,11 +441,12 @@ impl Db {
                     .bind(candidate_commit)
                     .bind(icount_scenarios_missing)
                     .bind(walltime_scenarios_missing)
+                    .bind(memory_scenarios_missing)
                     .execute(t.deref_mut())
                     .await?;
 
                 // Insert the associated diffs
-                for diff in result.icount.diffs.into_iter().chain(result.walltime.diffs) {
+                for diff in result.icount.diffs.into_iter().chain(result.walltime.diffs).chain(result.memory.diffs) {
                     sqlx::query(
                         "INSERT INTO scenario_diffs (comparison_run_id, scenario_name, scenario_kind, baseline_result, candidate_result, significance_threshold, cachegrind_diff) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     )
@@ -447,7 +486,7 @@ impl Db {
         let mut conn = self.sqlite.lock().await;
         let row = sqlx::query(
             r"
-            SELECT id, created_utc, icount_scenarios_missing_in_baseline, walltime_scenarios_missing_in_baseline
+            SELECT id, created_utc, icount_scenarios_missing_in_baseline, walltime_scenarios_missing_in_baseline, memory_scenarios_missing_in_baseline
             FROM comparison_runs
             WHERE baseline_commit = ? AND candidate_commit = ?",
         )
@@ -465,6 +504,8 @@ impl Db {
             from_json_array(row.try_get("icount_scenarios_missing_in_baseline")?)?;
         let walltime_scenarios_missing_in_baseline =
             from_json_array(row.try_get("walltime_scenarios_missing_in_baseline")?)?;
+        let memory_scenarios_missing_in_baseline =
+            from_json_array(row.try_get("memory_scenarios_missing_in_baseline")?)?;
 
         let icount_diffs = sqlx::query_as(
             r"
@@ -483,8 +524,19 @@ impl Db {
             FROM scenario_diffs
             WHERE comparison_run_id = ? AND scenario_kind = ?",
         )
-        .bind(id)
+        .bind(&id)
         .bind(ScenarioKind::Walltime as i64)
+        .fetch_all(conn.deref_mut())
+        .await?;
+
+        let memory_diffs = sqlx::query_as(
+            r"
+            SELECT *
+            FROM scenario_diffs
+            WHERE comparison_run_id = ? AND scenario_kind = ?",
+        )
+        .bind(id)
+        .bind(ScenarioKind::Memory as i64)
         .fetch_all(conn.deref_mut())
         .await?;
 
@@ -497,6 +549,11 @@ impl Db {
             walltime: ComparisonSubResult {
                 scenarios_missing_in_baseline: walltime_scenarios_missing_in_baseline,
                 diffs: walltime_diffs,
+                memory_details: None,
+            },
+            memory: ComparisonSubResult {
+                scenarios_missing_in_baseline: memory_scenarios_missing_in_baseline,
+                diffs: memory_diffs,
                 memory_details: None,
             },
         }))
@@ -702,6 +759,7 @@ mod test {
         let candidate_commit = "7faf240afbdbb4e76c47ff5f3f049c7a78c9c843";
         let icount_diffs = make_diffs(ScenarioKind::Icount);
         let walltime_diffs = make_diffs(ScenarioKind::Walltime);
+        let memory_diffs = make_diffs(ScenarioKind::Memory);
 
         db.store_comparison_result(
             baseline_commit.to_string(),
@@ -715,6 +773,11 @@ mod test {
                 walltime: ComparisonSubResult {
                     scenarios_missing_in_baseline: Vec::new(),
                     diffs: walltime_diffs.clone(),
+                    memory_details: None,
+                },
+                memory: ComparisonSubResult {
+                    scenarios_missing_in_baseline: Vec::new(),
+                    diffs: memory_diffs.clone(),
                     memory_details: None,
                 },
             },
@@ -785,6 +848,11 @@ mod test {
                 walltime: ComparisonSubResult {
                     diffs: Vec::new(),
                     scenarios_missing_in_baseline: vec!["baz".to_string()],
+                    memory_details: None,
+                },
+                memory: ComparisonSubResult {
+                    diffs: Vec::new(),
+                    scenarios_missing_in_baseline: vec!["quux".to_string()],
                     memory_details: None,
                 },
             },

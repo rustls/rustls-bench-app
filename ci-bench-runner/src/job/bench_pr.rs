@@ -17,7 +17,10 @@ use tempfile::TempDir;
 use time::{Duration, OffsetDateTime};
 use tracing::{error, trace};
 
-use super::{icounts_path, read_icount_results, read_walltime_results, walltimes_path};
+use super::{
+    icounts_path, maybe_read_memory_results, memory_path, read_icount_results,
+    read_walltime_results, walltimes_path,
+};
 use crate::db::{BenchResult, ComparisonResult, ComparisonSubResult, ScenarioDiff, ScenarioKind};
 use crate::event_queue::JobContext;
 use crate::github::api::{CommentEvent, PullRequestReviewEvent};
@@ -298,13 +301,20 @@ async fn bench_pr_and_cache_results(
     let icount_significance_thresholds = calculate_significance_thresholds(icount_results);
 
     let walltime_results = historical_results
-        .into_iter()
-        .filter(|r| r.scenario_kind == ScenarioKind::Walltime);
+        .iter()
+        .filter(|r| r.scenario_kind == ScenarioKind::Walltime)
+        .cloned();
     let walltime_significance_thresholds = calculate_significance_thresholds(walltime_results);
+
+    let memory_results = historical_results
+        .into_iter()
+        .filter(|r| r.scenario_kind == ScenarioKind::Memory);
+    let memory_significance_thresholds = calculate_significance_thresholds(memory_results);
 
     let significance_thresholds = SignificanceThresholds {
         icount: icount_significance_thresholds,
         walltime: walltime_significance_thresholds,
+        memory: memory_significance_thresholds,
     };
 
     let job_output_dir = ctx.job_output_dir.clone();
@@ -421,6 +431,35 @@ fn compare_refs(
         MINIMUM_WALLTIME_NOISE_THRESHOLD,
     )?;
 
+    let memory_baseline = maybe_read_memory_results(&memory_path(&job_output_path.join("base")))?;
+    let memory_candidate =
+        maybe_read_memory_results(&memory_path(&job_output_path.join("candidate")))?;
+
+    let (memory_diffs, memory_missing) = compare_results(
+        job_output_path,
+        &distill_memory(&memory_baseline),
+        &distill_memory(&memory_candidate),
+        &significance_thresholds.memory,
+        ScenarioKind::Memory,
+        DEFAULT_MEMORY_NOISE_THRESHOLD,
+        MINIMUM_MEMORY_NOISE_THRESHOLD,
+    )?;
+
+    let memory_details = Some(
+        memory_diffs
+            .iter()
+            .map(|diff| {
+                (
+                    diff.scenario_name.clone(),
+                    (
+                        *memory_baseline.get(&diff.scenario_name).unwrap(),
+                        *memory_candidate.get(&diff.scenario_name).unwrap(),
+                    ),
+                )
+            })
+            .collect(),
+    );
+
     Ok(ComparisonResult {
         icount: ComparisonSubResult {
             diffs: icount_diffs,
@@ -432,7 +471,21 @@ fn compare_refs(
             scenarios_missing_in_baseline: walltime_missing,
             memory_details: None,
         },
+        memory: ComparisonSubResult {
+            diffs: memory_diffs,
+            scenarios_missing_in_baseline: memory_missing,
+            memory_details,
+        },
     })
+}
+
+/// Controls how the comparison is done between MemoryDetails, by distilling a
+/// single f64 from it.
+fn distill_memory(input: &HashMap<String, MemoryDetails>) -> HashMap<String, f64> {
+    input
+        .iter()
+        .map(|(scenario, detail)| (scenario.clone(), detail.comparison_basis() as f64))
+        .collect()
 }
 
 /// Returns the calculated significance threshold for each scenario
@@ -481,6 +534,7 @@ pub fn calculate_significance_thresholds(
 struct SignificanceThresholds {
     icount: HashMap<String, f64>,
     walltime: HashMap<String, f64>,
+    memory: HashMap<String, f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -513,6 +567,7 @@ fn markdown_comment(
             cachegrind_diff_url: diff_url,
             icount: Diffs::from_sub_result(bench_results.icount),
             walltime: Diffs::from_sub_result(bench_results.walltime),
+            memory: Diffs::from_sub_result(bench_results.memory),
             branches,
             bencher_project_id,
             common_time_unit: |x, y| common_time_unit(*x, *y),
@@ -665,6 +720,8 @@ pub struct ComparisonSuccessComment<'a> {
     icount: Diffs,
     /// Diffs for the walltime benchmarks
     walltime: Diffs,
+    /// Diffs for the memory benchmarks
+    memory: Diffs,
     /// The base url to obtain cachegrind diffs
     cachegrind_diff_url: &'a str,
     /// Information about the branches that were compared
@@ -737,6 +794,8 @@ static DEFAULT_ICOUNT_NOISE_THRESHOLD: f64 = 0.002; // 0.2%
 static MINIMUM_ICOUNT_NOISE_THRESHOLD: f64 = 0.002; // 0.2%
 static DEFAULT_WALLTIME_NOISE_THRESHOLD: f64 = 0.05; // 5%
 static MINIMUM_WALLTIME_NOISE_THRESHOLD: f64 = 0.01; // 1%
+static DEFAULT_MEMORY_NOISE_THRESHOLD: f64 = 0.001; // 0.1%
+static MINIMUM_MEMORY_NOISE_THRESHOLD: f64 = 0.001; // 0.1%
 static APP_NAME: &str = "rustls-benchmarking";
 
 /// Functions inside this module will be available as askama filters
