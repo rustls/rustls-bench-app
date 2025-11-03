@@ -82,6 +82,36 @@ _There are no other wall-time count differences_
 
 {% endif %}
 
+## Memory usage
+
+{% call macros::missing_scenarios(memory.scenarios_missing_in_baseline) %}
+
+Key:
+
+- ∑: sum usage for entire benchmark run
+- 🔝: peak usage
+- B: bytes
+- a: allocations
+
+#### Significant differences
+
+{% if memory.significant_diffs.is_empty() %}
+
+_There are no significant memory usage differences_
+
+{% else %}
+
+⚠️ There are significant memory usage differences
+
+<details>
+<summary>Click to expand</summary>
+
+{% call macros::memory_table(memory.significant_diffs, memory.memory_details, true) %}
+
+</details>
+
+{% endif %}
+
 ## Additional information
 
 {% if let Some(project_id) = bencher_project_id %}

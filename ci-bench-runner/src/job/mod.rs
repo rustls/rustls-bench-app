@@ -80,6 +80,46 @@ pub fn read_walltime_results(path: &Path) -> anyhow::Result<HashMap<String, f64>
     Ok(results)
 }
 
+/// Reads the (benchmark, result) pairs from previous CSV output
+pub fn maybe_read_memory_results(path: &Path) -> anyhow::Result<HashMap<String, MemoryDetails>> {
+    trace!(
+        path = path.display().to_string(),
+        "reading memory results from CSV file"
+    );
+
+    let mut results = HashMap::new();
+    let results_file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            trace!("failed to open file {e:?} (ignoring)");
+            return Ok(results);
+        }
+    };
+    for line in BufReader::new(results_file).lines() {
+        let line = line.context("failed to read line from CSV file")?;
+        let line = line.trim();
+        let mut parts = line.split(',');
+
+        let scenario = parts.next().ok_or(anyhow!("empty line"))?.to_string();
+        let counts: Result<Vec<_>, _> = parts.map(|s| s.parse::<u64>()).collect();
+        let details = match counts.context("invalid u64 in row")?.as_slice() {
+            [heap_total_bytes, heap_total_blocks, heap_peak_bytes, heap_peak_blocks] => {
+                MemoryDetails {
+                    heap_total_bytes: *heap_total_bytes,
+                    heap_total_blocks: *heap_total_blocks,
+                    heap_peak_bytes: *heap_peak_bytes,
+                    heap_peak_blocks: *heap_peak_blocks,
+                }
+            }
+            _ => bail!("incorrect number of measurements for memory results row"),
+        };
+
+        results.insert(scenario, details);
+    }
+
+    Ok(results)
+}
+
 fn icounts_path(base: &Path) -> PathBuf {
     base.join("results/icounts.csv")
 }
@@ -88,10 +128,68 @@ pub fn walltimes_path(base: &Path) -> PathBuf {
     base.join("results/walltimes.csv")
 }
 
+pub fn memory_path(base: &Path) -> PathBuf {
+    base.join("results/memory.csv")
+}
+
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct MemoryDetails {
     pub(crate) heap_total_bytes: u64,
     pub(crate) heap_total_blocks: u64,
     pub(crate) heap_peak_bytes: u64,
     pub(crate) heap_peak_blocks: u64,
+}
+
+impl MemoryDetails {
+    /// Which field we use to compare two `MemoryDetails`
+    fn comparison_basis(&self) -> u64 {
+        self.heap_total_bytes
+    }
+
+    /// Returns a string, like the `Display` impl, that illustrates
+    /// the difference between the baseline `self` and `candidate`.
+    pub(crate) fn diff_string(&self, candidate: MemoryDetails) -> String {
+        let heap_total_bytes = candidate.heap_total_bytes as f64 - self.heap_total_bytes as f64;
+        let heap_total_blocks = candidate.heap_total_blocks as f64 - self.heap_total_blocks as f64;
+        let heap_peak_bytes = candidate.heap_peak_bytes as f64 - self.heap_peak_bytes as f64;
+        let heap_peak_blocks = candidate.heap_peak_blocks as f64 - self.heap_peak_blocks as f64;
+
+        format!(
+            "∑ {heap_total_bytes:+}B  {heap_total_blocks:+}a<br/>🔝 {heap_peak_bytes:+}B  {heap_peak_blocks:+}a"
+        )
+    }
+}
+
+impl std::fmt::Display for MemoryDetails {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "∑ {}B  {}a<br/>🔝 {}B  {}a",
+            self.heap_total_bytes,
+            self.heap_total_blocks,
+            self.heap_peak_bytes,
+            self.heap_peak_blocks
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_diff() {
+        let start = MemoryDetails {
+            heap_total_bytes: 10,
+            heap_total_blocks: 0,
+            heap_peak_bytes: 20,
+            heap_peak_blocks: 30,
+        };
+        let end = MemoryDetails {
+            heap_total_bytes: 10,
+            heap_total_blocks: 20,
+            heap_peak_bytes: 15,
+            heap_peak_blocks: 10,
+        };
+        assert_eq!(start.diff_string(end), "∑ +0B  +20a<br/>🔝 -5B  -20a");
+    }
 }
