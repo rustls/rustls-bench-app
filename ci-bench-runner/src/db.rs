@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -9,6 +10,8 @@ use sqlx::{Connection, Error, FromRow, Row, SqliteConnection};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use uuid::Uuid;
+
+use crate::job::MemoryDetails;
 
 /// An enqueued GitHub event
 #[derive(Debug)]
@@ -92,6 +95,8 @@ pub struct ComparisonSubResult {
     pub diffs: Vec<ScenarioDiff>,
     /// Benchmark scenarios present in the candidate but missing in the baseline
     pub scenarios_missing_in_baseline: Vec<String>,
+    /// Detailed results for memory jobs (name -> (baseline, candidate))
+    pub(crate) memory_details: Option<HashMap<String, (MemoryDetails, MemoryDetails)>>,
 }
 
 /// A diff for a particular scenario, obtained by comparing benchmark results between two versions
@@ -487,10 +492,12 @@ impl Db {
             icount: ComparisonSubResult {
                 scenarios_missing_in_baseline: icount_scenarios_missing_in_baseline,
                 diffs: icount_diffs,
+                memory_details: None,
             },
             walltime: ComparisonSubResult {
                 scenarios_missing_in_baseline: walltime_scenarios_missing_in_baseline,
                 diffs: walltime_diffs,
+                memory_details: None,
             },
         }))
     }
@@ -703,10 +710,12 @@ mod test {
                 icount: ComparisonSubResult {
                     scenarios_missing_in_baseline: Vec::new(),
                     diffs: icount_diffs.clone(),
+                    memory_details: None,
                 },
                 walltime: ComparisonSubResult {
                     scenarios_missing_in_baseline: Vec::new(),
                     diffs: walltime_diffs.clone(),
+                    memory_details: None,
                 },
             },
         )
@@ -771,10 +780,12 @@ mod test {
                 icount: ComparisonSubResult {
                     diffs: diffs.clone(),
                     scenarios_missing_in_baseline: vec!["bar".to_string()],
+                    memory_details: None,
                 },
                 walltime: ComparisonSubResult {
                     diffs: Vec::new(),
                     scenarios_missing_in_baseline: vec!["baz".to_string()],
+                    memory_details: None,
                 },
             },
         )

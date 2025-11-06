@@ -87,3 +87,11 @@ fn icounts_path(base: &Path) -> PathBuf {
 pub fn walltimes_path(base: &Path) -> PathBuf {
     base.join("results/walltimes.csv")
 }
+
+#[derive(Copy, Clone, Debug, Default)]
+pub(crate) struct MemoryDetails {
+    pub(crate) heap_total_bytes: u64,
+    pub(crate) heap_total_blocks: u64,
+    pub(crate) heap_peak_bytes: u64,
+    pub(crate) heap_peak_blocks: u64,
+}
