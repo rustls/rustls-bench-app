@@ -22,6 +22,7 @@ use crate::db::{BenchResult, ComparisonResult, ComparisonSubResult, ScenarioDiff
 use crate::event_queue::JobContext;
 use crate::github::api::{CommentEvent, PullRequestReviewEvent};
 use crate::github::{self, update_commit_status};
+use crate::job::MemoryDetails;
 use crate::runner::{write_logs_for_run, BenchRunner, Log};
 use crate::CommitIdentifier;
 
@@ -424,10 +425,12 @@ fn compare_refs(
         icount: ComparisonSubResult {
             diffs: icount_diffs,
             scenarios_missing_in_baseline: icount_missing,
+            memory_details: None,
         },
         walltime: ComparisonSubResult {
             diffs: walltime_diffs,
             scenarios_missing_in_baseline: walltime_missing,
+            memory_details: None,
         },
     })
 }
@@ -679,6 +682,8 @@ pub struct Diffs {
     negligible_diffs: Vec<ScenarioDiff>,
     /// Benchmark scenarios present in the candidate but missing in the baseline
     scenarios_missing_in_baseline: Vec<String>,
+    /// Detailed results for memory jobs
+    memory_details: Option<HashMap<String, (MemoryDetails, MemoryDetails)>>,
 }
 
 impl Diffs {
@@ -688,6 +693,7 @@ impl Diffs {
             significant_diffs,
             negligible_diffs,
             scenarios_missing_in_baseline: sub_result.scenarios_missing_in_baseline,
+            memory_details: sub_result.memory_details,
         }
     }
 }

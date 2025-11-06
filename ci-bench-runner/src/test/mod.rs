@@ -476,10 +476,12 @@ async fn test_pr_synchronize_cached() {
                         significance_threshold: 0.35,
                         cachegrind_diff: Some("dummy cachegrind diff".to_string()),
                     }],
+                    memory_details: None,
                 },
                 walltime: ComparisonSubResult {
                     scenarios_missing_in_baseline: vec!["bar".to_string()],
                     diffs: Vec::new(),
+                    memory_details: None,
                 },
             },
         )
@@ -657,10 +659,12 @@ async fn test_get_cachegrind_diff() {
                         significance_threshold: 0.35,
                         cachegrind_diff: Some("dummy cachegrind diff".to_string()),
                     }],
+                    memory_details: None,
                 },
                 walltime: ComparisonSubResult {
                     scenarios_missing_in_baseline: vec!["bar".to_string()],
                     diffs: Vec::new(),
+                    memory_details: None,
                 },
             },
         )
