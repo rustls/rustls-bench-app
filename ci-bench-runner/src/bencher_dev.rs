@@ -10,6 +10,7 @@ use bencher_client::{
 };
 use tracing::error;
 
+use crate::job::MemoryDetails;
 use crate::BencherConfig;
 
 /// The Bencher.dev client along with its configuration
@@ -33,6 +34,7 @@ impl BencherDev {
     }
 
     /// Sends the icount and walltime results to bencher.dev for visualization
+    #[expect(clippy::too_many_arguments)]
     pub async fn track_results(
         &self,
         branch: &str,
@@ -41,9 +43,14 @@ impl BencherDev {
         end_time: DateTime,
         icounts: HashMap<String, f64>,
         walltimes: HashMap<String, f64>,
+        memory: HashMap<String, MemoryDetails>,
     ) -> anyhow::Result<()> {
         let mut bmf_map = results_to_bmf(icounts, INSTRUCTIONS_SLUG_STR.parse().unwrap());
-        bmf_map.extend(results_to_bmf(walltimes, LATENCY_SLUG_STR.parse().unwrap()));
+        merge(
+            &mut bmf_map,
+            results_to_bmf(walltimes, LATENCY_SLUG_STR.parse().unwrap()),
+        );
+        memory_results_to_bmf(&mut bmf_map, memory);
 
         let testbed = self.config.testbed_id.clone();
         let report = JsonNewReport {
@@ -78,6 +85,49 @@ impl BencherDev {
     }
 }
 
+fn memory_results_to_bmf(out: &mut JsonResultsMap, results: HashMap<String, MemoryDetails>) {
+    merge(
+        out,
+        results_to_bmf(
+            results
+                .iter()
+                .map(|(k, v)| (k.clone(), v.heap_peak_blocks as f64))
+                .collect(),
+            "heap-peak-blocks".parse().unwrap(),
+        ),
+    );
+    merge(
+        out,
+        results_to_bmf(
+            results
+                .iter()
+                .map(|(k, v)| (k.clone(), v.heap_peak_bytes as f64))
+                .collect(),
+            "heap-peak-bytes".parse().unwrap(),
+        ),
+    );
+    merge(
+        out,
+        results_to_bmf(
+            results
+                .iter()
+                .map(|(k, v)| (k.clone(), v.heap_total_blocks as f64))
+                .collect(),
+            "heap-total-blocks".parse().unwrap(),
+        ),
+    );
+    merge(
+        out,
+        results_to_bmf(
+            results
+                .iter()
+                .map(|(k, v)| (k.clone(), v.heap_total_bytes as f64))
+                .collect(),
+            "heap-total-bytes".parse().unwrap(),
+        ),
+    );
+}
+
 /// Converts the instruction counts map into Bencher Metric Format (BMF)
 ///
 /// See <https://bencher.dev/docs/explanation/adapters#-json> for details
@@ -105,4 +155,20 @@ fn results_to_bmf(results: HashMap<String, f64>, measure: Measure) -> JsonResult
             Some((benchmark_name, metrics))
         })
         .collect()
+}
+
+/// Merges `src` into `target.
+///
+/// With both `src` and `target` in the form:
+///
+/// ```json
+/// { "benchmark-name": { "measure": { ... }}}
+/// ```
+///
+/// Ensures multiple measures appear in the end result.  Does
+/// not require that "benchmark-name" exists in `target`.
+fn merge(target: &mut JsonResultsMap, src: JsonResultsMap) {
+    for (bench, contents) in src.into_iter() {
+        target.entry(bench).or_default().extend(contents);
+    }
 }
