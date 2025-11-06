@@ -5,7 +5,10 @@ use bencher_client::json::DateTime;
 use tempfile::TempDir;
 use tracing::{trace, warn};
 
-use super::{icounts_path, read_icount_results, read_walltime_results, walltimes_path};
+use super::{
+    icounts_path, maybe_read_memory_results, memory_path, read_icount_results,
+    read_walltime_results, walltimes_path,
+};
 use crate::db::ScenarioKind;
 use crate::event_queue::JobContext;
 use crate::github::api::PushEvent;
@@ -79,6 +82,8 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
         .context("failed to read instruction counts from file")?;
     let walltimes = read_walltime_results(&walltimes_path(&ctx.job_output_dir))
         .context("failed to read walltimes from file")?;
+    let memory = maybe_read_memory_results(&memory_path(&ctx.job_output_dir))
+        .context("failed to read memory results from file")?;
 
     // Persist results in the DB and in bencher.dev
     let results = icounts
@@ -89,6 +94,13 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
                 .iter()
                 .map(|(scenario, result)| (scenario.clone(), ScenarioKind::Walltime, *result)),
         )
+        .chain(memory.iter().map(|(scenario, result)| {
+            (
+                scenario.clone(),
+                ScenarioKind::Memory,
+                result.comparison_basis() as f64,
+            )
+        }))
         .collect();
     ctx.db
         .store_run_results(results)
@@ -104,6 +116,7 @@ pub async fn bench_main(ctx: JobContext<'_>) -> anyhow::Result<()> {
                 benchmark_run_end,
                 icounts,
                 walltimes,
+                memory,
             )
             .await
             .context("failed to send results to bencher.dev");

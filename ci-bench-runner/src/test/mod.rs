@@ -645,7 +645,7 @@ async fn test_push_happy_path() {
         .await
         .unwrap()
         .len();
-    assert_eq!(result_count, 4);
+    assert_eq!(result_count, 6);
 }
 
 #[tokio::test]
