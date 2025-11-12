@@ -211,22 +211,10 @@ pub async fn bench_pr(
     )
     .await;
 
-    let cached_result = ctx
-        .db
-        .comparison_result(
-            &branches.baseline.commit_sha,
-            &branches.candidate.commit_sha,
-        )
-        .await?;
-    let result = match cached_result {
-        Some(result) => Ok(result),
-        None => {
-            let mut logs = BenchPrLogs::default();
-            bench_pr_and_cache_results(&ctx, branches.clone(), &mut logs)
-                .await
-                .map_err(|error| BenchPrError { error, logs })
-        }
-    };
+    let mut logs = BenchPrLogs::default();
+    let result = bench_pr_and_cache_results(&ctx, branches.clone(), &mut logs)
+        .await
+        .map_err(|error| BenchPrError { error, logs });
 
     let cachegrind_diff_url = format!(
         "{}/comparisons/{}:{}/cachegrind-diff",
