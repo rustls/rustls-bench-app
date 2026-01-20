@@ -11,7 +11,7 @@ use askama::Template;
 use octocrab::models::pulls::PullRequest;
 use octocrab::models::webhook_events::payload::PullRequestWebhookEventAction;
 use octocrab::models::webhook_events::{WebhookEvent, WebhookEventPayload};
-use octocrab::models::StatusState;
+use octocrab::models::{Repository, StatusState};
 use octocrab::Octocrab;
 use tempfile::TempDir;
 use time::{Duration, OffsetDateTime};
@@ -81,6 +81,7 @@ pub async fn handle_issue_comment(ctx: JobContext<'_>) -> anyhow::Result<()> {
 
     let octocrab = ctx.octocrab.cached();
     if body.contains(&format!("@{APP_NAME} bench")) {
+        let repo_checked = RepoChecked(()); // from configuration
         let pr = octocrab
             .pulls(&ctx.config.github_repo_owner, &ctx.config.github_repo_name)
             .get(payload.issue.number)
@@ -88,7 +89,7 @@ pub async fn handle_issue_comment(ctx: JobContext<'_>) -> anyhow::Result<()> {
             .context("unable to get PR details")?;
 
         let branches = pr_branches(&pr).ok_or(anyhow!("unable to get PR branch details"))?;
-        bench_pr(ctx, pr.number, branches).await
+        bench_pr(ctx, pr.number, branches, repo_checked).await
     } else if body.contains(&format!("@{APP_NAME}")) {
         trace!("the comment was addressed at the application, but it is an unknown command!");
         let comment = format!(
@@ -124,6 +125,14 @@ pub async fn handle_pr_review(ctx: JobContext<'_>) -> anyhow::Result<()> {
         return Ok(());
     };
 
+    let repo_checked = match pr_target_ok(payload.pull_request.base.repo.as_ref(), ctx.config) {
+        Ok(rc) => rc,
+        Err(message) => {
+            error!(message);
+            return Ok(());
+        }
+    };
+
     if payload.action != "submitted" {
         trace!("ignoring pull request event with action {}", payload.action);
         return Ok(());
@@ -145,7 +154,7 @@ pub async fn handle_pr_review(ctx: JobContext<'_>) -> anyhow::Result<()> {
     // Ensure we bench the commit that was reviewed, and not something else
     branches.candidate.commit_sha = payload.review.commit_id;
 
-    bench_pr(ctx, pr.number, branches).await
+    bench_pr(ctx, pr.number, branches, repo_checked).await
 }
 
 /// Handle a "PR update"
@@ -166,6 +175,14 @@ pub async fn handle_pr_update(ctx: JobContext<'_>) -> anyhow::Result<()> {
     let WebhookEventPayload::PullRequest(payload) = event.specific else {
         error!("invalid JSON payload, ignoring event");
         return Ok(());
+    };
+
+    let repo_checked = match pr_target_ok(payload.pull_request.base.repo.as_ref(), ctx.config) {
+        Ok(rc) => rc,
+        Err(message) => {
+            error!(message);
+            return Ok(());
+        }
     };
 
     let allowed_actions = [
@@ -192,13 +209,14 @@ pub async fn handle_pr_update(ctx: JobContext<'_>) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    bench_pr(ctx, payload.pull_request.number, branches).await
+    bench_pr(ctx, payload.pull_request.number, branches, repo_checked).await
 }
 
-pub async fn bench_pr(
+async fn bench_pr(
     ctx: JobContext<'_>,
     pr_number: u64,
     branches: PrBranches,
+    _repo_checked: RepoChecked,
 ) -> anyhow::Result<()> {
     let job_url = format!("{}/jobs/{}", ctx.config.app_base_url, ctx.job_id);
     let octocrab = ctx.octocrab.cached();
@@ -366,6 +384,29 @@ fn pr_branches(pr: &PullRequest) -> Option<PrBranches> {
         },
     })
 }
+
+fn pr_target_ok(
+    target_repo: Option<&Repository>,
+    config: &crate::AppConfig,
+) -> Result<RepoChecked, String> {
+    let configured_full_name = format!("{}/{}", config.github_repo_owner, config.github_repo_name);
+
+    match target_repo
+        .as_ref()
+        .map(|repo| repo.full_name.as_ref() == Some(&configured_full_name))
+        .unwrap_or_default()
+    {
+        true => Ok(RepoChecked(())),
+        false => Err(format!(
+            "ignoring webhook for wrong PR target (base = {:?}, configured = {:?})",
+            target_repo.and_then(|repo| repo.full_name.as_ref()),
+            configured_full_name
+        )),
+    }
+}
+
+#[must_use]
+struct RepoChecked(());
 
 fn compare_refs(
     pr_branches: &PrBranches,
