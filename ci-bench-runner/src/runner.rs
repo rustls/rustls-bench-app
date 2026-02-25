@@ -89,7 +89,7 @@ impl BenchRunner for LocalBenchRunner {
         command
             .arg("build")
             .arg("--locked")
-            .arg("--release")
+            .arg("--profile=bench")
             .current_dir(&bench_path);
 
         run_command(command, command_logs)?;
